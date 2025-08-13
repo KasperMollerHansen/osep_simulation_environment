@@ -113,13 +113,13 @@ echo source ~/ws_ros2/install/setup.bash >> ~/.bashrc
 </details>
 
 <details>
-<summary>Guide to install the pegasus_sim_env pkg </summary>
+<summary>Guide to install the osep_simulation_environment pkg </summary>
 
 ### Clone the pkg ###
 ```
 mkdir -p ~/ws_ros2/src/
 cd ~/ws_ros2/src/
-git clone https://github.com/KasperMollerHansen/pegasus_sim_env.git
+git clone https://github.com/KasperMollerHansen/osep_simulation_environment.git
 cd ..
 colcon build
 ```
@@ -127,7 +127,7 @@ colcon build
 ### Setup Alias ###
 Create alias in ~/.bashrc to use the scripts in this repo.
 ```
-alias pegasus_launch="cd ~/ws_ros2 && source install/setup.bash && ./src/pegasus_sim_env/launch_pegasus.sh"
+alias pegasus_launch="cd ~/ws_ros2 && source install/setup.bash && ./src/osep_simulation_environment/launch_pegasus.sh"
 ```
 </details>
 
@@ -143,11 +143,11 @@ pegasus_launch
 To launch the planner used with Nvblox
 ```
 source install/setup.bash
-ros2 launch pegasus_sim_env pegasus.launch.py
+ros2 launch osep_simulation_environment pegasus.launch.py
 ```
 To run the testflight
 ```
 ISAAC_ENV
 source install/setup.bash
-ros2 run pegasus_sim_env test_flight.py
+ros2 run osep_simulation_environment test_flight.py
 ```
