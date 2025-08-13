@@ -28,7 +28,9 @@ Isaac Sim should now open
 
 Create alias in ~/.bashrc to use the scripts in this repo.
 ```
-alias ISAAC_ENV="source ~/isaacsim/setup_conda_env.sh"
+echo 'alias ISAAC_ENV="source ~/isaacsim/setup_conda_env.sh"' >> ~/.bashrc
+
+source ~/.bashrc
 ```
 
 </details>
@@ -127,7 +129,9 @@ colcon build
 ### Setup Alias ###
 Create alias in ~/.bashrc to use the scripts in this repo.
 ```
-alias pegasus_launch="cd ~/ws_ros2 && source install/setup.bash && ./src/osep_simulation_environment/launch_pegasus.sh"
+echo 'alias pegasus_launch="cd ~/ws_ros2 && source install/setup.bash && ./src/osep_simulation_environment/launch_pegasus.sh"' >> ~/.bashrc
+
+source ~/.bashrc
 ```
 </details>
 
