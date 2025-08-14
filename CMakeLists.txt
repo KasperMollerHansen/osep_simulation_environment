@@ -41,20 +41,18 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 
 
-# Build px4_msg_converter_node executable
-add_executable(px4_msg_converter_node src/px4_msg_converter_node.cpp)
-target_include_directories(px4_msg_converter_node PUBLIC
+
+# Build px4_bridge executable
+add_executable(px4_bridge src/px4_bridge.cpp)
+target_include_directories(px4_bridge PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-ament_target_dependencies(px4_msg_converter_node ${dependencies})
+ament_target_dependencies(px4_bridge ${dependencies})
 rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
-target_link_libraries(px4_msg_converter_node ${cpp_typesupport_target})
+target_link_libraries(px4_bridge ${cpp_typesupport_target} px4_offboard_control)
 
-# Build tests if required
-
-
-install(TARGETS px4_msg_converter_node
+install(TARGETS px4_bridge
   DESTINATION lib/${PROJECT_NAME}
 )
 
