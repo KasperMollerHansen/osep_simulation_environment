@@ -12,7 +12,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(px4_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -29,7 +28,22 @@ set(dependencies
     sensor_msgs
     tf2
     tf2_ros
-    builtin_interfaces
+)
+
+
+add_executable(px4_bridge src/px4_bridge.cpp)
+ament_target_dependencies(px4_bridge
+  ${dependencies}
+)
+
+# If your include files are in include/
+target_include_directories(px4_bridge PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+install(TARGETS px4_bridge
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY include/
