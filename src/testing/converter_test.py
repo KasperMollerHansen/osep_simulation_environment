@@ -22,7 +22,7 @@ class TestTrajectorySetpointPublisher(Node):
 
         if elapsed < 60.0:
             msg.position = np.array([nan, nan, nan], dtype=np.float32)
-            msg.velocity = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+            msg.velocity = np.array([0.0, 0.0, 15.0], dtype=np.float32)
             msg.acceleration = np.array([nan, nan, nan], dtype=np.float32)
             msg.jerk = np.array([nan, nan, nan], dtype=np.float32)
             msg.yaw = nan
