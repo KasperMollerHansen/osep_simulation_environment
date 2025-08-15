@@ -45,7 +45,7 @@ public:
 
         // Timer at 1ms (1000Hz)
         timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(100), // Should be 1
+            std::chrono::milliseconds(10), // Should be 1
             std::bind(&PX4VelController::timer_callback, this)
         );
     }
@@ -118,6 +118,31 @@ private:
             i = path_copy->poses.size() - 1;
         }
         target_idx_ = i;
+
+        size_t furthest_idx = target_idx_;
+        Eigen::Vector3d start = current_tf_pos;
+        Eigen::Vector3d ref_dir = (Eigen::Vector3d(
+            path_copy->poses.back().pose.position.x,
+            path_copy->poses.back().pose.position.y,
+            path_copy->poses.back().pose.position.z
+        ) - start).normalized();
+
+        double collinear_thresh = 0.5; // This needs tuning!!
+        for (size_t i = target_idx_; i < path_copy->poses.size(); ++i) {
+            const auto &pose = path_copy->poses[i];
+            Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
+            Eigen::Vector3d dir = pos - start;
+            if (dir.norm() < 1e-6) continue; // skip if same as start
+
+            // Check if direction is collinear with reference direction
+            double cross_norm = (dir.normalized().cross(ref_dir)).norm();
+            if (cross_norm < collinear_thresh) {
+                furthest_idx = i;
+            } else {
+                break; // Stop at first non-collinear point
+            }
+        }
+        target_idx_ = furthest_idx;
         
         const auto &target_pose = path_copy->poses[target_idx_];
         Eigen::Vector3d target_pos(target_pose.pose.position.x, target_pose.pose.position.y, target_pose.pose.position.z);
@@ -136,10 +161,6 @@ private:
         if (distance > 1e-6) {
             velocity_world = diff.normalized() * adaptive_speed;
         }
-
-        // Print velocity_world
-        RCLCPP_INFO(this->get_logger(), "Velocity World: [%.2f, %.2f, %.2f]",
-            velocity_world.x(), velocity_world.y(), velocity_world.z());
 
         // --- PID Controller for velocity smoothing ---
         rclcpp::Time now = this->now();
