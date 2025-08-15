@@ -7,8 +7,8 @@ namespace osep_simulation_environment {
 PX4MsgConverterNode::PX4MsgConverterNode(const rclcpp::NodeOptions & options)
 : rclcpp::Node("trajectory_setpoint_converter_node", options)
 {
-    this->declare_parameter<std::string>("input_vel_cmd", "/osep/vel_cmd");
-    std::string topic_name = this->get_parameter("input_vel_cmd").as_string();
+    this->declare_parameter<std::string>("osep_vel_cmd", "/osep/vel_cmd");
+    std::string topic_name = this->get_parameter("osep_vel_cmd").as_string();
 
     // Define QoS profile for the subscriber
     rclcpp::QoS qos_profile(rclcpp::KeepLast(1));

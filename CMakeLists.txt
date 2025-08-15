@@ -28,6 +28,7 @@ set(dependencies
     sensor_msgs
     tf2
     tf2_ros
+    Eigen3
 )
 
 
@@ -42,7 +43,20 @@ target_include_directories(px4_msg_converter_node PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-install(TARGETS px4_msg_converter_node
+add_executable(px4_vel_controller src/px4_vel_controller.cpp)
+ament_target_dependencies(px4_vel_controller
+  ${dependencies}
+)
+
+target_include_directories(px4_vel_controller PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+# Install the executables
+install(TARGETS
+  px4_msg_converter_node
+  px4_vel_controller
   DESTINATION lib/${PROJECT_NAME}
 )
 
