@@ -13,9 +13,10 @@ def generate_launch_description():
         ),
         Node(
             package='osep_simulation_environment',
-            executable='px4_msg_converter_node',
-            name='px4_msg_converter_node',
+            executable='px4_vel_controller',
+            name='px4_vel_controller',
             parameters=[{
+                'path_topic': '/planner/path',
                 'osep_vel_cmd': '/osep/vel_cmd',
                 'interpolation_distance': 2.0  # Added parameter
             }]
