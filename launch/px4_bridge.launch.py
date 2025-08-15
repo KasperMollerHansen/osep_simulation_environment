@@ -16,9 +16,10 @@ def generate_launch_description():
             executable='px4_vel_controller',
             name='px4_vel_controller',
             parameters=[{
-                'path_topic': '/planner/path',
+                'path_topic': '/planner/smoothed_path',
                 'osep_vel_cmd': '/osep/vel_cmd',
-                'interpolation_distance': 2.0  # Added parameter
+                'interpolation_distance': 3.0,  
+                'max_speed': 15.0,
             }]
         )
     ])

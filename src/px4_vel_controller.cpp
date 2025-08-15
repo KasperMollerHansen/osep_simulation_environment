@@ -20,10 +20,13 @@ public:
         this->declare_parameter<std::string>("path_topic", "/planner/path");
         this->declare_parameter<std::string>("osep_vel_cmd", "/osep/vel_cmd");
         this->declare_parameter<double>("interpolation_distance", 2.0);
+        this->declare_parameter<double>("max_speed", 15.0);
+
 
         std::string path_topic = this->get_parameter("path_topic").as_string();
         std::string vel_cmd_topic = this->get_parameter("osep_vel_cmd").as_string();
         interpolation_distance_ = this->get_parameter("interpolation_distance").as_double();
+        max_speed_ = this->get_parameter("max_speed").as_double();
 
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -42,7 +45,7 @@ public:
 
         // Timer at 1ms (1000Hz)
         timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(1),
+            std::chrono::milliseconds(100), // Should be 1
             std::bind(&PX4VelController::timer_callback, this)
         );
     }
@@ -56,8 +59,10 @@ private:
 
     PIDController pid_;
     Eigen::Vector3d last_velocity_;
+    Eigen::Vector3d last_acc_ = Eigen::Vector3d::Zero(); // <-- Add this line
     rclcpp::Time last_time_;
 
+    double max_speed_{15.0}; // m/s, tune as needed
     double interpolation_distance_{2.0};
 
     size_t target_idx_ = 0;
@@ -117,7 +122,24 @@ private:
         const auto &target_pose = path_copy->poses[target_idx_];
         Eigen::Vector3d target_pos(target_pose.pose.position.x, target_pose.pose.position.y, target_pose.pose.position.z);
 
-        Eigen::Vector3d velocity_world = (target_pos - current_tf_pos).normalized();
+        Eigen::Vector3d diff = target_pos - current_tf_pos;
+        double distance = diff.norm();
+        // Print diff
+        RCLCPP_INFO(this->get_logger(), "Position Diff: [%.2f, %.2f, %.2f]",
+            diff.x(), diff.y(), diff.z());
+
+        // --- Adaptive speed based on distance ---
+        double k_speed = 1.0; // Tune this gain as needed
+        double adaptive_speed = std::min(max_speed_, k_speed * distance);
+
+        Eigen::Vector3d velocity_world = Eigen::Vector3d::Zero();
+        if (distance > 1e-6) {
+            velocity_world = diff.normalized() * adaptive_speed;
+        }
+
+        // Print velocity_world
+        RCLCPP_INFO(this->get_logger(), "Velocity World: [%.2f, %.2f, %.2f]",
+            velocity_world.x(), velocity_world.y(), velocity_world.z());
 
         // --- PID Controller for velocity smoothing ---
         rclcpp::Time now = this->now();
@@ -132,26 +154,36 @@ private:
         double max_jerk = 2.0; // m/s^3, tune as needed
 
         Eigen::Vector3d acc = (safe_velocity - last_velocity_) / dt;
-        static Eigen::Vector3d last_acc = Eigen::Vector3d::Zero();
-        Eigen::Vector3d jerk = (acc - last_acc) / dt;
-        last_acc = acc;
 
         // Clamp acceleration
         for (int i = 0; i < 3; ++i) {
             if (std::abs(acc[i]) > max_acc)
                 acc[i] = std::copysign(max_acc, acc[i]);
         }
+
+        // Compute jerk
+        Eigen::Vector3d jerk = (acc - last_acc_) / dt;
+
         // Clamp jerk
         for (int i = 0; i < 3; ++i) {
             if (std::abs(jerk[i]) > max_jerk)
-                acc[i] = last_acc[i] + std::copysign(max_jerk * dt, jerk[i]);
+                acc[i] = last_acc_[i] + std::copysign(max_jerk * dt, jerk[i]);
         }
+
         safe_velocity = last_velocity_ + acc * dt;
+        last_acc_ = acc; // Update after all clamping
+
+        // Print velocity
+        RCLCPP_INFO(this->get_logger(), "Safe Velocity: [%.2f, %.2f, %.2f]",
+            safe_velocity.x(), safe_velocity.y(), safe_velocity.z());
 
         last_velocity_ = safe_velocity;
 
+
         // Publish the safe velocity
         px4_msgs::msg::TrajectorySetpoint msg;
+        msg.position = {NAN, NAN, NAN};
+
         msg.velocity[0] = static_cast<float>(safe_velocity.x());
         msg.velocity[1] = static_cast<float>(safe_velocity.y());
         msg.velocity[2] = static_cast<float>(safe_velocity.z());
