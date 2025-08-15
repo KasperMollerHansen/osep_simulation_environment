@@ -10,8 +10,11 @@ public:
     PX4MsgConverterNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
     : Node("trajectory_setpoint_converter_node", options)
     {
+        this->declare_parameter<std::string>("input_vel_cmd", "/osep/vel_cmd");
+        std::string topic_name = this->get_parameter("input_vel_cmd").as_string();
+
         sub_ = this->create_subscription<px4_msgs::msg::TrajectorySetpoint>(
-            "/osep/test", 10,
+            topic_name, 10,
             std::bind(&PX4MsgConverterNode::callback, this, std::placeholders::_1)
         );
     }
@@ -21,7 +24,6 @@ private:
         auto converted = PX4MsgConverter::convert(*msg);
         RCLCPP_INFO(this->get_logger(), "Converted TrajectorySetpoint: [%.2f, %.2f, %.2f]",
             converted.position[0], converted.position[1], converted.position[2]);
-        // Add further processing or publishing here if needed
     }
 
     rclcpp::Subscription<px4_msgs::msg::TrajectorySetpoint>::SharedPtr sub_;
