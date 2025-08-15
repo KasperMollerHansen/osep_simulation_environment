@@ -8,7 +8,7 @@ import math
 class TestTrajectorySetpointPublisher(Node):
     def __init__(self):
         super().__init__('test_trajectory_setpoint_publisher')
-        self.publisher_ = self.create_publisher(TrajectorySetpoint, '/osep/test', 10)
+        self.publisher_ = self.create_publisher(TrajectorySetpoint, '/osep/vel_cmd', 10)
         self.timer_period = 1.0  # seconds
         self.timer = self.create_timer(self.timer_period, self.timer_callback)
         self.count = 0
