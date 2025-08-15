@@ -32,30 +32,6 @@ set(dependencies
     builtin_interfaces
 )
 
-
-# Message generation
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/Action.msg"
-  DEPENDENCIES builtin_interfaces
-)
-
-
-
-
-# Build px4_bridge executable
-add_executable(px4_bridge src/px4_bridge.cpp)
-target_include_directories(px4_bridge PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
-ament_target_dependencies(px4_bridge ${dependencies})
-rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
-target_link_libraries(px4_bridge ${cpp_typesupport_target} px4_offboard_control)
-
-install(TARGETS px4_bridge
-  DESTINATION lib/${PROJECT_NAME}
-)
-
 install(DIRECTORY include/
   DESTINATION include/
 )
