@@ -8,7 +8,7 @@ def generate_launch_description():
             executable='px4_msg_converter_node',
             name='px4_msg_converter_node',
             parameters=[{
-                'input_vel_cmd': '/osep/test'
+                'input_vel_cmd': '/osep/vel_cmd'
             }]
         )
     ])
