@@ -105,8 +105,8 @@ private:
             transform_stamped.transform.translation.y,
             transform_stamped.transform.translation.z);
 
-        // Find the first pose more than 1 meter away
-         size_t i = target_idx_;
+        // Find the first pose more than interpolation_distance_ away
+        size_t i = target_idx_;
         for (; i < path_copy->poses.size(); ++i) {
             const auto &pose = path_copy->poses[i];
             Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
