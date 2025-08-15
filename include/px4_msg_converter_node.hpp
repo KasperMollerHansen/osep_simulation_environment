@@ -17,16 +17,20 @@ public:
             topic_name, 10,
             std::bind(&PX4MsgConverterNode::callback, this, std::placeholders::_1)
         );
+
+        trajectory_setpoint_publisher_ = this->create_publisher<px4_msgs::msg::TrajectorySetpoint>(
+            "/fmu/in/trajectory_setpoint", 10
+        );
     }
 
 private:
     void callback(const px4_msgs::msg::TrajectorySetpoint::SharedPtr msg) {
         auto converted = PX4MsgConverter::convert(*msg);
-        RCLCPP_INFO(this->get_logger(), "Converted TrajectorySetpoint: [%.2f, %.2f, %.2f]",
-            converted.position[0], converted.position[1], converted.position[2]);
+        trajectory_setpoint_publisher_->publish(converted);
     }
 
     rclcpp::Subscription<px4_msgs::msg::TrajectorySetpoint>::SharedPtr sub_;
+    rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr trajectory_setpoint_publisher_;
 };
 
 } // namespace osep_simulation_environment
