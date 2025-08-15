@@ -13,8 +13,13 @@ public:
         this->declare_parameter<std::string>("input_vel_cmd", "/osep/vel_cmd");
         std::string topic_name = this->get_parameter("input_vel_cmd").as_string();
 
+        // Define QoS profile for the subscriber
+        rclcpp::QoS qos_profile(rclcpp::KeepLast(1));
+        qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
+        qos_profile.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
+
         sub_ = this->create_subscription<px4_msgs::msg::TrajectorySetpoint>(
-            topic_name, 10,
+            topic_name, qos_profile,
             std::bind(&PX4MsgConverterNode::callback, this, std::placeholders::_1)
         );
 
