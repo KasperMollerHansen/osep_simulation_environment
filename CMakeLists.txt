@@ -31,18 +31,18 @@ set(dependencies
 )
 
 
-add_executable(px4_bridge src/px4_bridge.cpp)
-ament_target_dependencies(px4_bridge
+add_executable(px4_msg_converter_node src/px4_msg_converter_node.cpp)
+ament_target_dependencies(px4_msg_converter_node
   ${dependencies}
 )
 
 # If your include files are in include/
-target_include_directories(px4_bridge PUBLIC
+target_include_directories(px4_msg_converter_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 
-install(TARGETS px4_bridge
+install(TARGETS px4_msg_converter_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
