@@ -46,8 +46,16 @@ install(TARGETS px4_bridge
   DESTINATION lib/${PROJECT_NAME}
 )
 
-install(DIRECTORY include/
-  DESTINATION include/
+# Install the launch directory
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+
+
+## Python testing ##
+install(PROGRAMS
+  src/testing/converter_test.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 # Build tests if required
