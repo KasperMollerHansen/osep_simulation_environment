@@ -363,7 +363,7 @@ void PX4VelController::publish_vel_setpoint(const Eigen::Vector3d& safe_velocity
     msg.acceleration[2] = static_cast<float>(last_acc_.z());
 
     msg.yaw = NAN;
-    msg.yawspeed = yawspeed_cmd;
+    msg.yawspeed = static_cast<float>(yawspeed_cmd);
     vel_pub_->publish(msg);
 }
 
