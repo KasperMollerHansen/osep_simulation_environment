@@ -207,9 +207,6 @@ private:
         RCLCPP_INFO(this->get_logger(), "Position Diff: [%.2f, %.2f, %.2f]",
             diff.x(), diff.y(), diff.z());
 
-        // --- Adaptive speed based on distance ---
-        double k_speed = 0.3; // Tune this gain as needed
-        double adaptive_speed = std::min(max_speed_, k_speed * distance);
 
         Eigen::Vector3d desired_dir = diff.normalized();
 
@@ -221,42 +218,54 @@ private:
         dir_dot = std::clamp(dir_dot, -1.0, 1.0);
         double angle = std::acos(dir_dot); // radians
 
-        // --- Look ahead to next N path segments for upcoming sharp turn ---
-        const int lookahead_points = 3;
-        double max_lookahead_angle = 0.0;
+        const int lookahead_points = 5;
+        Eigen::Vector3d avg_look_dir = Eigen::Vector3d::Zero();
+        int avg_count = 0;
+
         for (int k = 1; k <= lookahead_points; ++k) {
             if (target_idx_ + k < path_copy->poses.size()) {
                 const auto& next_pose = path_copy->poses[target_idx_ + k];
                 Eigen::Vector3d next_pos(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z);
-                Eigen::Vector3d look_dir = (next_pos - target_pos).normalized();
+                Eigen::Vector3d look_dir = (next_pos - target_pos);
                 if (look_dir.norm() < 1e-6) continue;
-                double dot = desired_dir.dot(look_dir);
-                dot = std::clamp(dot, -1.0, 1.0);
-                double lookahead_angle = std::acos(dot);
-                if (lookahead_angle > max_lookahead_angle) max_lookahead_angle = lookahead_angle;
+                avg_look_dir += look_dir.normalized();
+                avg_count++;
             }
         }
-
-        // Use the larger of the current and lookahead angles
-        double effective_angle = std::max(angle, max_lookahead_angle);
+        double effective_angle = angle; 
+        if (avg_count > 0) {
+            avg_look_dir.normalize();
+            double avg_dot = desired_dir.dot(avg_look_dir);
+            avg_dot = std::clamp(avg_dot, -1.0, 1.0);
+            double avg_lookahead_angle = std::acos(avg_dot);
+            // Use the larger of the current and averaged lookahead angles
+            effective_angle = std::max(angle, avg_lookahead_angle);
+            // ...use effective_angle for your sharp turn logic...
+        } else {
+            // Fallback: just use current angle
+            effective_angle = angle;
+            // ...use effective_angle for your sharp turn logic...
+        }
 
         // Threshold for "sharp turn" (e.g., > 60 degrees)
         double sharp_turn_thresh = M_PI / 3.0;
 
-        Eigen::Vector3d velocity_world = Eigen::Vector3d::Zero();
+        // --- Adaptive speed based on distance ---
+        double k_speed = 0.1; // Tune this gain as needed
 
+        double adaptive_speed = 0.0;
         if (distance > 1e-6) {
-            adaptive_speed = std::min(max_speed_, k_speed * distance);
+            adaptive_speed = k_speed * std::pow(distance, 1.4);
+            adaptive_speed = std::min(max_speed_, adaptive_speed);
 
             // Only enforce inspection_speed if not a sharp turn (now using effective_angle)
             if (effective_angle < sharp_turn_thresh) {
                 adaptive_speed = std::max(inspection_speed_, adaptive_speed);
             }
             // else: allow speed to go to zero for sharp turns
-            velocity_world = desired_dir * adaptive_speed;
-        } else {
-            velocity_world = Eigen::Vector3d::Zero();
         }
+
+        Eigen::Vector3d velocity_world = desired_dir * adaptive_speed;
 
        // --- PID Controller for velocity smoothing ---
         rclcpp::Time now = this->now();
