@@ -16,7 +16,7 @@ class PX4VelController : public rclcpp::Node
 public:
     PX4VelController()
     : Node("px4_vel_controller"),
-      pid_(0.3, 0.0, 0.05), // Tune these gains!
+      pid_(0.3, 0.0, 0.2), // Tune these gains!
       last_velocity_(Eigen::Vector3d::Zero())
     {
         this->declare_parameter<std::string>("path_topic", "/planner/path");
@@ -140,7 +140,7 @@ private:
         size_t furthest_idx = target_idx_;
         Eigen::Vector3d prev_pos = current_tf_pos; // Start from current vehicle position
         double deg_to_rad = M_PI / 180.0;
-        double yaw_thresh = 1.0 * deg_to_rad; // 1 degree in radians
+        double yaw_thresh = 2.0 * deg_to_rad; // 1 degree in radians
         double collinear_dot_thresh = std::cos(yaw_thresh); // 1 degree in radians, for dot product
 
         // Use the yaw of the point at target_idx_ as the initial reference
@@ -210,8 +210,9 @@ private:
         // --- Adaptive speed based on distance ---
         double k_speed = 0.3; // Tune this gain as needed
         double adaptive_speed = std::min(max_speed_, k_speed * distance);
- 
+
         Eigen::Vector3d desired_dir = diff.normalized();
+
         double current_speed = last_velocity_.norm();
         Eigen::Vector3d current_dir = (current_speed > 1e-3) ? last_velocity_.normalized() : desired_dir;
 
@@ -220,17 +221,35 @@ private:
         dir_dot = std::clamp(dir_dot, -1.0, 1.0);
         double angle = std::acos(dir_dot); // radians
 
-        // Threshold for "sharp turn" (e.g., > 45 degrees)
-        double sharp_turn_thresh = M_PI / 4.0;
+        // --- Look ahead to next N path segments for upcoming sharp turn ---
+        const int lookahead_points = 3;
+        double max_lookahead_angle = 0.0;
+        for (int k = 1; k <= lookahead_points; ++k) {
+            if (target_idx_ + k < path_copy->poses.size()) {
+                const auto& next_pose = path_copy->poses[target_idx_ + k];
+                Eigen::Vector3d next_pos(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z);
+                Eigen::Vector3d look_dir = (next_pos - target_pos).normalized();
+                if (look_dir.norm() < 1e-6) continue;
+                double dot = desired_dir.dot(look_dir);
+                dot = std::clamp(dot, -1.0, 1.0);
+                double lookahead_angle = std::acos(dot);
+                if (lookahead_angle > max_lookahead_angle) max_lookahead_angle = lookahead_angle;
+            }
+        }
 
-        // Declare velocity_world here
+        // Use the larger of the current and lookahead angles
+        double effective_angle = std::max(angle, max_lookahead_angle);
+
+        // Threshold for "sharp turn" (e.g., > 60 degrees)
+        double sharp_turn_thresh = M_PI / 3.0;
+
         Eigen::Vector3d velocity_world = Eigen::Vector3d::Zero();
 
         if (distance > 1e-6) {
             adaptive_speed = std::min(max_speed_, k_speed * distance);
 
-            // Only enforce inspection_speed if not a sharp turn
-            if (angle < sharp_turn_thresh) {
+            // Only enforce inspection_speed if not a sharp turn (now using effective_angle)
+            if (effective_angle < sharp_turn_thresh) {
                 adaptive_speed = std::max(inspection_speed_, adaptive_speed);
             }
             // else: allow speed to go to zero for sharp turns
@@ -248,8 +267,8 @@ private:
         Eigen::Vector3d safe_velocity = last_velocity_ + pid_.compute(velocity_error, dt);
 
         // Adaptive acceleration limit based on squared velocity
-        double base_max_acc = 0.05;  // Minimum acceleration (gentle)
-        double acc_gain = 0.05;     // Tune this gain as needed
+        double base_max_acc = 0.1;  // Minimum acceleration (gentle)
+        double acc_gain = 0.04;     // Tune this gain as needed
 
         double speed = last_velocity_.norm();
         double max_acc = base_max_acc + acc_gain * speed * speed;
@@ -258,8 +277,8 @@ private:
         double max_acc_limit = 4.0; // m/s^2, tune as needed
         if (max_acc > max_acc_limit) max_acc = max_acc_limit;
 
-        double base_max_jerk = 0.05; // m/s^3
-        double jerk_gain = 0.05;     // Tune this gain as needed
+        double base_max_jerk = 0.1; // m/s^3
+        double jerk_gain = 0.04;     // Tune this gain as needed
         double max_jerk = base_max_jerk + jerk_gain * speed * speed;
         double max_jerk_limit = 4.0; // Clamp if needed
         if (max_jerk > max_jerk_limit) max_jerk = max_jerk_limit;
@@ -291,7 +310,7 @@ private:
 
         // --- Yaw control ---
         // Scalar PID for yaw
-        static double yaw_kp = 0.5, yaw_ki = 0.0, yaw_kd = 0.2;
+        static double yaw_kp = 0.3, yaw_ki = 0.0, yaw_kd = 0.5;
         static double yaw_integral = 0.0;
         static double last_yaw_error = 0.0;
         static double last_yawspeed = 0.0;
@@ -363,11 +382,11 @@ private:
         last_yaw_error = yaw_error;
 
         // Clamp yawspeed
-        double max_yawspeed = 0.2; // rad/s, tune as needed
+        double max_yawspeed = 0.5; // rad/s, tune as needed
         yawspeed_cmd = std::clamp(yawspeed_cmd, -max_yawspeed, max_yawspeed);
 
         // Optionally, smooth yawspeed (rate limit)
-        double max_yaw_acc = 0.05; // rad/s^2, tune as needed
+        double max_yaw_acc = 0.1; // rad/s^2, tune as needed
         double yawspeed_acc = (yawspeed_cmd - last_yawspeed) / dt;
         if (std::abs(yawspeed_acc) > max_yaw_acc)
             yawspeed_cmd = last_yawspeed + std::copysign(max_yaw_acc * dt, yawspeed_acc);
