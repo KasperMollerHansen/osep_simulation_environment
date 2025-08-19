@@ -105,12 +105,18 @@ private:
             transform_stamped.transform.translation.y,
             transform_stamped.transform.translation.z);
 
-        // Find the first pose more than interpolation_distance_ away
+        // Extract yaw from quaternion
+        const auto& q = transform_stamped.transform.rotation;
+        Eigen::Quaterniond quat(q.w, q.x, q.y, q.z);
+        Eigen::Vector3d euler = quat.toRotationMatrix().eulerAngles(0, 1, 2); // roll, pitch, yaw
+        double current_tf_yaw = euler[2];
+
+        // Find the first pose more than half interpolation_distance_ away
         size_t i = target_idx_;
         for (; i < path_copy->poses.size(); ++i) {
             const auto &pose = path_copy->poses[i];
             Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
-            if ((pos - current_tf_pos).norm() > interpolation_distance_) {
+            if ((pos - current_tf_pos).norm() > interpolation_distance_/2.0) {
                 break;
             }
         }
@@ -208,6 +214,9 @@ private:
         msg.velocity[0] = static_cast<float>(safe_velocity.x());
         msg.velocity[1] = static_cast<float>(safe_velocity.y());
         msg.velocity[2] = static_cast<float>(safe_velocity.z());
+
+        msg.yaw = NAN;
+        msg.yawspeed = 0.0;
         vel_pub_->publish(msg);
     }
 };

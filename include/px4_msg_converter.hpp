@@ -24,7 +24,7 @@ public:
         setpoint.jerk[1] = input.jerk[0];
         setpoint.jerk[2] = -input.jerk[2];
         setpoint.yaw = -input.yaw + static_cast<float>(M_PI / 2.0f);
-        setpoint.yawspeed = input.yawspeed;
+        setpoint.yawspeed = -input.yawspeed;
         return setpoint;
     }
 };
