@@ -21,12 +21,14 @@ public:
         this->declare_parameter<std::string>("osep_vel_cmd", "/osep/vel_cmd");
         this->declare_parameter<double>("interpolation_distance", 2.0);
         this->declare_parameter<double>("max_speed", 15.0);
+        this->declare_parameter<double>("min_speed", 1.0);
 
 
         std::string path_topic = this->get_parameter("path_topic").as_string();
         std::string vel_cmd_topic = this->get_parameter("osep_vel_cmd").as_string();
         interpolation_distance_ = this->get_parameter("interpolation_distance").as_double();
         max_speed_ = this->get_parameter("max_speed").as_double();
+        min_speed_ = this->get_parameter("min_speed").as_double();
 
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -63,6 +65,7 @@ private:
     rclcpp::Time last_time_;
 
     double max_speed_{15.0}; // m/s, tune as needed
+    double min_speed_{1.0};
     double interpolation_distance_{2.0};
 
     size_t target_idx_ = 0;
@@ -127,7 +130,7 @@ private:
 
         size_t furthest_idx = target_idx_;
         Eigen::Vector3d prev_pos = current_tf_pos; // Start from current vehicle position
-        double collinear_dot_thresh = 0.99; // Accepts ~8 degrees deviation, tune as needed
+        double collinear_dot_thresh = 0.995; // Accepts ~8 degrees deviation, tune as needed
         double yaw_thresh = 0.05; // radians, tune as needed
 
         // Use the yaw of the point at target_idx_ as the reference
@@ -188,15 +191,16 @@ private:
             diff.x(), diff.y(), diff.z());
 
         // --- Adaptive speed based on distance ---
-        double k_speed = 1.0; // Tune this gain as needed
+        double k_speed = 0.3; // Tune this gain as needed
         double adaptive_speed = std::min(max_speed_, k_speed * distance);
+        adaptive_speed = std::max(min_speed_, adaptive_speed);
 
         Eigen::Vector3d velocity_world = Eigen::Vector3d::Zero();
         if (distance > 1e-6) {
             velocity_world = diff.normalized() * adaptive_speed;
         }
 
-        // --- PID Controller for velocity smoothing ---
+       // --- PID Controller for velocity smoothing ---
         rclcpp::Time now = this->now();
         double dt = last_time_.nanoseconds() > 0 ? (now - last_time_).seconds() : 0.01;
         last_time_ = now;
@@ -204,9 +208,22 @@ private:
         Eigen::Vector3d velocity_error = velocity_world - last_velocity_;
         Eigen::Vector3d safe_velocity = last_velocity_ + pid_.compute(velocity_error, dt);
 
-        // Limit acceleration and jerk
-        double max_acc = 1.0; // m/s^2, tune as needed
-        double max_jerk = 2.0; // m/s^3, tune as needed
+        // Adaptive acceleration limit based on squared velocity
+        double base_max_acc = 0.1;  // Minimum acceleration (gentle)
+        double acc_gain = 0.05;     // Tune this gain as needed
+
+        double speed = last_velocity_.norm();
+        double max_acc = base_max_acc + acc_gain * speed * speed;
+
+        // Optionally, clamp max_acc to a reasonable upper bound
+        double max_acc_limit = 4.0; // m/s^2, tune as needed
+        if (max_acc > max_acc_limit) max_acc = max_acc_limit;
+
+        double base_max_jerk = 0.1; // m/s^3
+        double jerk_gain = 0.05;     // Tune this gain as needed
+        double max_jerk = base_max_jerk + jerk_gain * speed * speed;
+        double max_jerk_limit = 4.0; // Clamp if needed
+        if (max_jerk > max_jerk_limit) max_jerk = max_jerk_limit;
 
         Eigen::Vector3d acc = (safe_velocity - last_velocity_) / dt;
 
@@ -227,7 +244,6 @@ private:
 
         safe_velocity = last_velocity_ + acc * dt;
         last_acc_ = acc; // Update after all clamping
-
         // Print velocity
         RCLCPP_INFO(this->get_logger(), "Safe Velocity: [%.2f, %.2f, %.2f]",
             safe_velocity.x(), safe_velocity.y(), safe_velocity.z());
