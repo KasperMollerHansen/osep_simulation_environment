@@ -37,6 +37,8 @@ private:
     std::mutex path_mutex_;
     Eigen::Vector3d last_safe_position_;
     rclcpp::Time last_path_time_;
+    Eigen::Vector3d last_valid_tf_pos_;
+    double last_valid_tf_yaw_;
 
     // Callbacks
     void path_callback(const nav_msgs::msg::Path::SharedPtr msg);
@@ -57,4 +59,5 @@ private:
     Eigen::Vector3d calculate_safe_velocity(const nav_msgs::msg::Path::SharedPtr& path, const Eigen::Vector3d& current_tf_pos, double& effective_angle);
     void calculate_yaw(const nav_msgs::msg::Path::SharedPtr& path, const Eigen::Vector3d& safe_velocity, const Eigen::Vector3d& current_tf_pos, double& target_yaw, double& yawspeed_cmd, double current_tf_yaw);
     void publish_vel_setpoint(const Eigen::Vector3d& safe_velocity, double yawspeed_cmd);
+    void publish_safe_setpoint(const Eigen::Vector3d& safe_velocity, double yaw_cmd);
 };

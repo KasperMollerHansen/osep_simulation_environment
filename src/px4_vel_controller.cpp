@@ -361,25 +361,41 @@ void PX4VelController::publish_vel_setpoint(const Eigen::Vector3d& safe_velocity
     msg.acceleration[0] = static_cast<float>(last_acc_.x());
     msg.acceleration[1] = static_cast<float>(last_acc_.y());
     msg.acceleration[2] = static_cast<float>(last_acc_.z());
+
     msg.yaw = NAN;
     msg.yawspeed = yawspeed_cmd;
     vel_pub_->publish(msg);
 }
 
+void PX4VelController::publish_safe_setpoint(const Eigen::Vector3d& safe_velocity, double yaw_cmd)
+{
+    px4_msgs::msg::TrajectorySetpoint msg;
+    msg.position[0] = static_cast<float>(safe_velocity.x());
+    msg.position[1] = static_cast<float>(safe_velocity.y());
+    msg.position[2] = static_cast<float>(safe_velocity.z());
+
+    msg.yaw = static_cast<float>(yaw_cmd);
+    vel_pub_->publish(msg);
+}
+
 void PX4VelController::timer_callback()
 {
-    if (is_path_timeout()) {
+    Eigen::Vector3d current_tf_pos;
+    double current_tf_yaw;
+
+    nav_msgs::msg::Path::SharedPtr path_copy;
+    // Only proceed if both pose and path are valid
+    if (!get_valid_pose(current_tf_pos, current_tf_yaw) ||
+        is_path_timeout() || !get_valid_path(path_copy)) {
+
+        publish_safe_setpoint(last_valid_tf_pos_, last_valid_tf_yaw_);
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-            "No path received for 1.0 seconds, skipping control output.");
+            "No valid pose or path (timeout or empty), publishing last valid position and yaw.");
         return;
     }
 
-    nav_msgs::msg::Path::SharedPtr path_copy;
-    if (!get_valid_path(path_copy)) return;
-
-    Eigen::Vector3d current_tf_pos;
-    double current_tf_yaw;
-    if (!get_valid_pose(current_tf_pos, current_tf_yaw)) return;
+    last_valid_tf_pos_ = current_tf_pos;
+    last_valid_tf_yaw_ = current_tf_yaw;
 
     update_target_indices(path_copy, current_tf_pos);
 
