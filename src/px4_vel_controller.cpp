@@ -3,6 +3,8 @@
 #include "px4_msgs/msg/trajectory_setpoint.hpp"
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <eigen3/Eigen/Dense> // For Eigen::Vector3d
 #include <limits>
@@ -14,7 +16,7 @@ class PX4VelController : public rclcpp::Node
 public:
     PX4VelController()
     : Node("px4_vel_controller"),
-      pid_(1.0, 0.0, 0.1), // Tune these gains!
+      pid_(0.3, 0.0, 0.05), // Tune these gains!
       last_velocity_(Eigen::Vector3d::Zero())
     {
         this->declare_parameter<std::string>("path_topic", "/planner/path");
@@ -110,16 +112,16 @@ private:
 
         // Extract yaw from quaternion
         const auto& q = transform_stamped.transform.rotation;
-        Eigen::Quaterniond quat(q.w, q.x, q.y, q.z);
-        Eigen::Vector3d euler = quat.toRotationMatrix().eulerAngles(0, 1, 2); // roll, pitch, yaw
-        double current_tf_yaw = euler[2];
+        tf2::Quaternion tf2_quat(q.x, q.y, q.z, q.w);
+        double roll, pitch, current_tf_yaw;
+        tf2::Matrix3x3(tf2_quat).getRPY(roll, pitch, current_tf_yaw);
 
-        // Find the first pose more than half interpolation_distance_ away
+        // Find the first pose more than interpolation_distance_ away (Ensures Stability)
         size_t i = target_idx_;
         for (; i < path_copy->poses.size(); ++i) {
             const auto &pose = path_copy->poses[i];
             Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
-            if ((pos - current_tf_pos).norm() > interpolation_distance_/2.0) {
+            if ((pos - current_tf_pos).norm() > interpolation_distance_) {
                 break;
             }
         }
@@ -130,14 +132,15 @@ private:
 
         size_t furthest_idx = target_idx_;
         Eigen::Vector3d prev_pos = current_tf_pos; // Start from current vehicle position
-        double collinear_dot_thresh = 0.995; // Accepts ~8 degrees deviation, tune as needed
-        double yaw_thresh = 0.05; // radians, tune as needed
+        double deg_to_rad = M_PI / 180.0;
+        double yaw_thresh = 1.0 * deg_to_rad; // 1 degree in radians
+        double collinear_dot_thresh = std::cos(yaw_thresh); // 1 degree in radians, for dot product
 
         // Use the yaw of the point at target_idx_ as the initial reference
         const auto& start_q = path_copy->poses[target_idx_].pose.orientation;
-        Eigen::Quaterniond start_quat(start_q.w, start_q.x, start_q.y, start_q.z);
-        Eigen::Vector3d start_euler = start_quat.toRotationMatrix().eulerAngles(0, 1, 2); // roll, pitch, yaw
-        double prev_yaw = start_euler[2]; // <-- Use this as running reference
+        tf2::Quaternion tf2_start_quat(start_q.x, start_q.y, start_q.z, start_q.w);
+        double roll_start, pitch_start, prev_yaw;
+        tf2::Matrix3x3(tf2_start_quat).getRPY(roll_start, pitch_start, prev_yaw); // prev_yaw is now the running reference
 
         for (size_t i = target_idx_; i < path_copy->poses.size(); ++i) {
             const auto &pose = path_copy->poses[i];
@@ -149,7 +152,12 @@ private:
             if (i == target_idx_) {
                 furthest_idx = i;
                 prev_pos = pos;
-                prev_yaw = start_euler[2]; // Set running yaw
+                // Extract yaw from the current pose using tf2
+                const auto& q_init = pose.pose.orientation;
+                tf2::Quaternion tf2_quat_init(q_init.x, q_init.y, q_init.z, q_init.w);
+                double roll_init, pitch_init, yaw_init;
+                tf2::Matrix3x3(tf2_quat_init).getRPY(roll_init, pitch_init, yaw_init);
+                prev_yaw = yaw_init; // Set running yaw
                 continue;
             }
 
@@ -160,9 +168,9 @@ private:
 
             // Extract yaw from pose quaternion
             const auto& q = pose.pose.orientation;
-            Eigen::Quaterniond quat(q.w, q.x, q.y, q.z);
-            Eigen::Vector3d euler = quat.toRotationMatrix().eulerAngles(0, 1, 2); // roll, pitch, yaw
-            double pose_yaw = euler[2];
+            tf2::Quaternion tf2_quat(q.x, q.y, q.z, q.w);
+            double roll, pitch, pose_yaw;
+            tf2::Matrix3x3(tf2_quat).getRPY(roll, pitch, pose_yaw);
 
             // Compare to previous accepted yaw
             double yaw_diff = std::fabs(std::atan2(std::sin(pose_yaw - prev_yaw), std::cos(pose_yaw - prev_yaw)));
@@ -193,7 +201,7 @@ private:
             diff.x(), diff.y(), diff.z());
 
         // --- Adaptive speed based on distance ---
-        double k_speed = 0.3; // Tune this gain as needed
+        double k_speed = 0.2; // Tune this gain as needed
         double adaptive_speed = std::min(max_speed_, k_speed * distance);
         adaptive_speed = std::max(min_speed_, adaptive_speed);
 
@@ -211,7 +219,7 @@ private:
         Eigen::Vector3d safe_velocity = last_velocity_ + pid_.compute(velocity_error, dt);
 
         // Adaptive acceleration limit based on squared velocity
-        double base_max_acc = 0.1;  // Minimum acceleration (gentle)
+        double base_max_acc = 0.05;  // Minimum acceleration (gentle)
         double acc_gain = 0.05;     // Tune this gain as needed
 
         double speed = last_velocity_.norm();
@@ -221,7 +229,7 @@ private:
         double max_acc_limit = 4.0; // m/s^2, tune as needed
         if (max_acc > max_acc_limit) max_acc = max_acc_limit;
 
-        double base_max_jerk = 0.1; // m/s^3
+        double base_max_jerk = 0.05; // m/s^3
         double jerk_gain = 0.05;     // Tune this gain as needed
         double max_jerk = base_max_jerk + jerk_gain * speed * speed;
         double max_jerk_limit = 4.0; // Clamp if needed
@@ -254,7 +262,7 @@ private:
 
         // --- Yaw control ---
         // Scalar PID for yaw
-        static double yaw_kp = 1.0, yaw_ki = 0.0, yaw_kd = 0.1;
+        static double yaw_kp = 1.0, yaw_ki = 0.0, yaw_kd = 0.2;
         static double yaw_integral = 0.0;
         static double last_yaw_error = 0.0;
         static double last_yawspeed = 0.0;
@@ -267,9 +275,20 @@ private:
         // Compute yaw error (wrap to [-pi, pi])
         double yaw_error = std::atan2(std::sin(target_yaw - current_tf_yaw), std::cos(target_yaw - current_tf_yaw));
 
-        // Scalar PID for yawspeed
-        yaw_integral += yaw_error * dt;
+        RCLCPP_INFO(this->get_logger(), "Current Yaw: %.3f, Target Yaw: %.3f, Yaw Error: %.3f",
+            current_tf_yaw, target_yaw, yaw_error);
+        
+        // Precompute derivative
         double yaw_derivative = (yaw_error - last_yaw_error) / dt;
+
+        // Detect large error jump (wraparound)
+        if (std::abs(yaw_error - last_yaw_error) > M_PI) {
+            yaw_integral = 0.0;
+            yaw_derivative = 0.0;
+            RCLCPP_WARN(this->get_logger(), "Yaw error wrap detected, resetting integral and derivative.");
+        }
+
+        yaw_integral += yaw_error * dt;
         double yawspeed_cmd = yaw_kp * yaw_error + yaw_ki * yaw_integral + yaw_kd * yaw_derivative;
         last_yaw_error = yaw_error;
 
@@ -278,7 +297,7 @@ private:
         yawspeed_cmd = std::clamp(yawspeed_cmd, -max_yawspeed, max_yawspeed);
 
         // Optionally, smooth yawspeed (rate limit)
-        double max_yaw_acc = 0.01; // rad/s^2, tune as needed
+        double max_yaw_acc = 0.02; // rad/s^2, tune as needed
         double yawspeed_acc = (yawspeed_cmd - last_yawspeed) / dt;
         if (std::abs(yawspeed_acc) > max_yaw_acc)
             yawspeed_cmd = last_yawspeed + std::copysign(max_yaw_acc * dt, yawspeed_acc);
