@@ -49,6 +49,8 @@ PX4VelController::PX4VelController()
         std::chrono::milliseconds(ms_per_cycle),
         std::bind(&PX4VelController::timer_callback, this)
     );
+
+    last_path_time_ = this->now();
 }
 
 void PX4VelController::path_callback(const nav_msgs::msg::Path::SharedPtr msg)
@@ -232,35 +234,34 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
     return yawspeed_cmd;
 }
 
-void PX4VelController::timer_callback()
-{
-    // Tunable parameters
-    const int lookahead_points = 5;
-    const double path_timeout_sec = 1.0; // 1000 ms
+bool PX4VelController::is_path_timeout() {
+    const double path_timeout_sec = 1.0;
+    return (this->now() - last_path_time_).seconds() > path_timeout_sec;
+}
 
-    // Check for path timeout
-    if ((this->now() - last_path_time_).seconds() > path_timeout_sec) {
-        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-            "No path received for %.1f seconds, skipping control output.", path_timeout_sec);
-        return;
-    }
+bool PX4VelController::get_valid_path(nav_msgs::msg::Path::SharedPtr& path_copy) {
+    std::lock_guard<std::mutex> lock(path_mutex_);
+    path_copy = latest_path_;
+    return path_copy && !path_copy->poses.empty();
+}
 
-    nav_msgs::msg::Path::SharedPtr path_copy;
-    {
-        std::lock_guard<std::mutex> lock(path_mutex_);
-        path_copy = latest_path_;
-    }
-    if (!path_copy || path_copy->poses.empty()) return;
+bool PX4VelController::get_valid_pose(Eigen::Vector3d& pos, double& yaw) {
+    return get_current_pose(pos, yaw);
+}
 
-    Eigen::Vector3d current_tf_pos;
-    double current_tf_yaw;
-    if (!get_current_pose(current_tf_pos, current_tf_yaw)) return;
-
-    target_idx_ = find_target_idx(path_copy, current_tf_pos);
+void PX4VelController::update_target_indices(const nav_msgs::msg::Path::SharedPtr& path, const Eigen::Vector3d& current_tf_pos) {
+    target_idx_ = find_target_idx(path, current_tf_pos);
     double ref_yaw = 0.0;
-    target_idx_ = find_furthest_collinear_idx(path_copy, target_idx_, current_tf_pos, ref_yaw);
+    target_idx_ = find_furthest_collinear_idx(path, target_idx_, current_tf_pos, ref_yaw);
+}
 
-    const auto &target_pose = path_copy->poses[target_idx_];
+Eigen::Vector3d PX4VelController::calculate_safe_velocity(
+    const nav_msgs::msg::Path::SharedPtr& path,
+    const Eigen::Vector3d& current_tf_pos,
+    double& effective_angle)
+{
+    const int lookahead_points = 5;
+    const auto &target_pose = path->poses[target_idx_];
     Eigen::Vector3d target_pos(target_pose.pose.position.x, target_pose.pose.position.y, target_pose.pose.position.z);
     Eigen::Vector3d diff = target_pos - current_tf_pos;
     double distance = diff.norm();
@@ -276,8 +277,8 @@ void PX4VelController::timer_callback()
     Eigen::Vector3d avg_look_dir = Eigen::Vector3d::Zero();
     int avg_count = 0;
     for (int k = 1; k <= lookahead_points; ++k) {
-        if (target_idx_ + k < path_copy->poses.size()) {
-            const auto& next_pose = path_copy->poses[target_idx_ + k];
+        if (target_idx_ + k < path->poses.size()) {
+            const auto& next_pose = path->poses[target_idx_ + k];
             Eigen::Vector3d next_pos(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z);
             Eigen::Vector3d look_dir = (next_pos - target_pos);
             if (look_dir.norm() < 1e-6) continue;
@@ -285,7 +286,7 @@ void PX4VelController::timer_callback()
             avg_count++;
         }
     }
-    double effective_angle = angle;
+    effective_angle = angle;
     if (avg_count > 0) {
         avg_look_dir.normalize();
         double avg_dot = desired_dir.dot(avg_look_dir);
@@ -304,11 +305,21 @@ void PX4VelController::timer_callback()
     Eigen::Vector3d safe_velocity = compute_safe_velocity(velocity_world, dt);
 
     RCLCPP_INFO(this->get_logger(), "Safe Velocity: [%.2f, %.2f, %.2f]", safe_velocity.x(), safe_velocity.y(), safe_velocity.z());
+    return safe_velocity;
+}
 
-    // --- Yaw control ---
+void PX4VelController::calculate_yaw(
+    const nav_msgs::msg::Path::SharedPtr& path,
+    const Eigen::Vector3d& safe_velocity,
+    const Eigen::Vector3d& current_tf_pos,
+    double& target_yaw,
+    double& yawspeed_cmd,
+    double current_tf_yaw)
+{
+    const auto &target_pose = path->poses[target_idx_];
     const auto& target_q = target_pose.pose.orientation;
     tf2::Quaternion tf2_target_quat(target_q.x, target_q.y, target_q.z, target_q.w);
-    double roll_target, pitch_target, target_yaw;
+    double roll_target, pitch_target;
     tf2::Matrix3x3(tf2_target_quat).getRPY(roll_target, pitch_target, target_yaw);
 
     Eigen::Vector2d velocity_xy(safe_velocity.x(), safe_velocity.y());
@@ -332,13 +343,16 @@ void PX4VelController::timer_callback()
         }
     }
 
-    double yawspeed_cmd = compute_yawspeed(target_yaw, current_tf_yaw, dt);
+    double dt = last_time_.nanoseconds() > 0 ? (this->now() - last_time_).seconds() : 0.01;
+    yawspeed_cmd = compute_yawspeed(target_yaw, current_tf_yaw, dt);
 
     RCLCPP_INFO(this->get_logger(), "Current Yaw: %.3f, Target Yaw: %.3f, Yaw Error: %.3f",
         current_tf_yaw, target_yaw, std::atan2(std::sin(target_yaw - current_tf_yaw), std::cos(target_yaw - current_tf_yaw)));
     RCLCPP_INFO(this->get_logger(), "Yawspeed: %.3f rad/s", yawspeed_cmd);
+}
 
-    // Publish
+void PX4VelController::publish_vel_setpoint(const Eigen::Vector3d& safe_velocity, double yawspeed_cmd)
+{
     px4_msgs::msg::TrajectorySetpoint msg;
     msg.position = {NAN, NAN, NAN};
     msg.velocity[0] = static_cast<float>(safe_velocity.x());
@@ -350,6 +364,33 @@ void PX4VelController::timer_callback()
     msg.yaw = NAN;
     msg.yawspeed = yawspeed_cmd;
     vel_pub_->publish(msg);
+}
+
+void PX4VelController::timer_callback()
+{
+    if (is_path_timeout()) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+            "No path received for 1.0 seconds, skipping control output.");
+        return;
+    }
+
+    nav_msgs::msg::Path::SharedPtr path_copy;
+    if (!get_valid_path(path_copy)) return;
+
+    Eigen::Vector3d current_tf_pos;
+    double current_tf_yaw;
+    if (!get_valid_pose(current_tf_pos, current_tf_yaw)) return;
+
+    update_target_indices(path_copy, current_tf_pos);
+
+    double effective_angle = 0.0;
+    Eigen::Vector3d safe_velocity = calculate_safe_velocity(path_copy, current_tf_pos, effective_angle);
+
+    double target_yaw = 0.0;
+    double yawspeed_cmd = 0.0;
+    calculate_yaw(path_copy, safe_velocity, current_tf_pos, target_yaw, yawspeed_cmd, current_tf_yaw);
+
+    publish_vel_setpoint(safe_velocity, yawspeed_cmd);
 }
 
 int main(int argc, char * argv[])
