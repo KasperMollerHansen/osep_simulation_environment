@@ -126,26 +126,54 @@ private:
         target_idx_ = i;
 
         size_t furthest_idx = target_idx_;
-        Eigen::Vector3d start = current_tf_pos;
-        Eigen::Vector3d ref_dir = (Eigen::Vector3d(
-            path_copy->poses.back().pose.position.x,
-            path_copy->poses.back().pose.position.y,
-            path_copy->poses.back().pose.position.z
-        ) - start).normalized();
+        Eigen::Vector3d prev_pos = current_tf_pos; // Start from current vehicle position
+        double collinear_dot_thresh = 0.99; // Accepts ~8 degrees deviation, tune as needed
+        double yaw_thresh = 0.05; // radians, tune as needed
 
-        double collinear_thresh = 0.5; // This needs tuning!!
+        // Use the yaw of the point at target_idx_ as the reference
+        const auto& start_q = path_copy->poses[target_idx_].pose.orientation;
+        Eigen::Quaterniond start_quat(start_q.w, start_q.x, start_q.y, start_q.z);
+        Eigen::Vector3d start_euler = start_quat.toRotationMatrix().eulerAngles(0, 1, 2); // roll, pitch, yaw
+        double start_yaw = start_euler[2];
+
         for (size_t i = target_idx_; i < path_copy->poses.size(); ++i) {
             const auto &pose = path_copy->poses[i];
             Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
-            Eigen::Vector3d dir = pos - start;
-            if (dir.norm() < 1e-6) continue; // skip if same as start
+            Eigen::Vector3d dir = pos - prev_pos;
+            if (dir.norm() < 1e-6) continue; // skip if same as previous
 
-            // Check if direction is collinear with reference direction
-            double cross_norm = (dir.normalized().cross(ref_dir)).norm();
-            if (cross_norm < collinear_thresh) {
+            // For the first segment, accept it
+            if (i == target_idx_) {
                 furthest_idx = i;
+                prev_pos = pos;
+                continue;
+            }
+
+            // Compare direction of this segment to previous segment
+            Eigen::Vector3d prev_dir = prev_pos - current_tf_pos;
+            if (prev_dir.norm() < 1e-6) prev_dir = dir; // fallback for very first segment
+            double dot = dir.normalized().dot(prev_dir.normalized());
+
+            // Extract yaw from pose quaternion
+            const auto& q = pose.pose.orientation;
+            Eigen::Quaterniond quat(q.w, q.x, q.y, q.z);
+            Eigen::Vector3d euler = quat.toRotationMatrix().eulerAngles(0, 1, 2); // roll, pitch, yaw
+            double pose_yaw = euler[2];
+
+            // Check if yaw is close to start_yaw
+            double yaw_diff = std::fabs(std::atan2(std::sin(pose_yaw - start_yaw), std::cos(pose_yaw - start_yaw)));
+
+            if (dot > collinear_dot_thresh && yaw_diff < yaw_thresh) {
+                furthest_idx = i;
+                prev_pos = pos;
             } else {
-                break; // Stop at first non-collinear point
+                if (dot <= collinear_dot_thresh) {
+                    RCLCPP_INFO(this->get_logger(), "Break at idx %zu: Not collinear (dot=%.3f <= thresh=%.3f)", i, dot, collinear_dot_thresh);
+                }
+                if (yaw_diff >= yaw_thresh) {
+                    RCLCPP_INFO(this->get_logger(), "Break at idx %zu: Yaw mismatch (yaw_diff=%.3f >= thresh=%.3f)", i, yaw_diff, yaw_thresh);
+                }
+                break;
             }
         }
         target_idx_ = furthest_idx;
