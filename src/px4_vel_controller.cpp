@@ -56,6 +56,7 @@ void PX4VelController::path_callback(const nav_msgs::msg::Path::SharedPtr msg)
     std::lock_guard<std::mutex> lock(path_mutex_);
     latest_path_ = msg;
     target_idx_ = 0;
+    last_path_time_ = this->now();
 }
 
 bool PX4VelController::get_current_pose(Eigen::Vector3d &pos, double &yaw)
@@ -207,7 +208,7 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
     // Tunable parameters
     double max_yawspeed = 0.5;
     double max_yaw_acc = 0.2;
-    static double yaw_kp = 0.3, yaw_ki = 0.0, yaw_kd = 0.5;
+    static double yaw_kp = 0.6, yaw_ki = 0.0, yaw_kd = 1.0;
 
     static double yaw_integral = 0.0;
     static double last_yaw_error = 0.0;
@@ -235,6 +236,14 @@ void PX4VelController::timer_callback()
 {
     // Tunable parameters
     const int lookahead_points = 5;
+    const double path_timeout_sec = 1.0; // 1000 ms
+
+    // Check for path timeout
+    if ((this->now() - last_path_time_).seconds() > path_timeout_sec) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+            "No path received for %.1f seconds, skipping control output.", path_timeout_sec);
+        return;
+    }
 
     nav_msgs::msg::Path::SharedPtr path_copy;
     {
