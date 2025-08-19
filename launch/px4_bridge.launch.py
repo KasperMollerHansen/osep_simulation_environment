@@ -20,7 +20,7 @@ def generate_launch_description():
                 'osep_vel_cmd': '/osep/vel_cmd',
                 'interpolation_distance': 3.0,  
                 'max_speed': 15.0,
-                'min_speed': 1.0,
+                'inspection_speed': 2.0,
             }]
         )
     ])

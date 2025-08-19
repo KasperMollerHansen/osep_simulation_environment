@@ -23,14 +23,14 @@ public:
         this->declare_parameter<std::string>("osep_vel_cmd", "/osep/vel_cmd");
         this->declare_parameter<double>("interpolation_distance", 2.0);
         this->declare_parameter<double>("max_speed", 15.0);
-        this->declare_parameter<double>("min_speed", 1.0);
+        this->declare_parameter<double>("inspection_speed", 1.0);
 
 
         std::string path_topic = this->get_parameter("path_topic").as_string();
         std::string vel_cmd_topic = this->get_parameter("osep_vel_cmd").as_string();
         interpolation_distance_ = this->get_parameter("interpolation_distance").as_double();
         max_speed_ = this->get_parameter("max_speed").as_double();
-        min_speed_ = this->get_parameter("min_speed").as_double();
+        inspection_speed_ = this->get_parameter("inspection_speed").as_double();
 
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -67,7 +67,7 @@ private:
     rclcpp::Time last_time_;
 
     double max_speed_{15.0}; // m/s, tune as needed
-    double min_speed_{1.0};
+    double inspection_speed_{1.0};
     double interpolation_distance_{2.0};
 
     size_t target_idx_ = 0;
@@ -201,13 +201,35 @@ private:
             diff.x(), diff.y(), diff.z());
 
         // --- Adaptive speed based on distance ---
-        double k_speed = 0.5; // Tune this gain as needed
+        double k_speed = 0.3; // Tune this gain as needed
         double adaptive_speed = std::min(max_speed_, k_speed * distance);
-        adaptive_speed = std::max(min_speed_, adaptive_speed);
+ 
+        Eigen::Vector3d desired_dir = diff.normalized();
+        double current_speed = last_velocity_.norm();
+        Eigen::Vector3d current_dir = (current_speed > 1e-3) ? last_velocity_.normalized() : desired_dir;
 
+        // Angle between current and desired direction
+        double dir_dot = desired_dir.dot(current_dir);
+        dir_dot = std::clamp(dir_dot, -1.0, 1.0);
+        double angle = std::acos(dir_dot); // radians
+
+        // Threshold for "sharp turn" (e.g., > 45 degrees)
+        double sharp_turn_thresh = M_PI / 4.0;
+
+        // Declare velocity_world here
         Eigen::Vector3d velocity_world = Eigen::Vector3d::Zero();
+
         if (distance > 1e-6) {
-            velocity_world = diff.normalized() * adaptive_speed;
+            adaptive_speed = std::min(max_speed_, k_speed * distance);
+
+            // Only enforce inspection_speed if not a sharp turn
+            if (angle < sharp_turn_thresh) {
+                adaptive_speed = std::max(inspection_speed_, adaptive_speed);
+            }
+            // else: allow speed to go to zero for sharp turns
+            velocity_world = desired_dir * adaptive_speed;
+        } else {
+            velocity_world = Eigen::Vector3d::Zero();
         }
 
        // --- PID Controller for velocity smoothing ---
