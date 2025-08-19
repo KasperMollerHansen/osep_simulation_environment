@@ -12,6 +12,7 @@ PX4VelController::PX4VelController()
   last_acc_(Eigen::Vector3d::Zero()),
   target_idx_(0)
 {
+    // Tunable parameters
     this->declare_parameter<std::string>("path_topic", "/planner/path");
     this->declare_parameter<std::string>("osep_vel_cmd", "/osep/vel_cmd");
     this->declare_parameter<double>("interpolation_distance", 2.0);
@@ -94,11 +95,12 @@ size_t PX4VelController::find_target_idx(const nav_msgs::msg::Path::SharedPtr &p
 
 size_t PX4VelController::find_furthest_collinear_idx(const nav_msgs::msg::Path::SharedPtr &path, size_t start_idx, const Eigen::Vector3d &current_pos, double &ref_yaw)
 {
+    // Tunable parameters
+    double yaw_thresh = 2.0 * M_PI / 180.0;
+    double collinear_dot_thresh = std::cos(yaw_thresh);
+
     size_t furthest_idx = start_idx;
     Eigen::Vector3d prev_pos = current_pos;
-    double deg_to_rad = M_PI / 180.0;
-    double yaw_thresh = 2.0 * deg_to_rad;
-    double collinear_dot_thresh = std::cos(yaw_thresh);
 
     // Use the yaw of the point at start_idx as the initial reference
     const auto& start_q = path->poses[start_idx].pose.orientation;
@@ -142,11 +144,13 @@ size_t PX4VelController::find_furthest_collinear_idx(const nav_msgs::msg::Path::
 
 double PX4VelController::compute_adaptive_speed(double distance, double effective_angle)
 {
-    double k_speed = 0.1;
-    double sharp_turn_thresh = M_PI / 3.0;
+    // Tunable parameters
+    double k_speed = 0.15;
+    double sharp_turn_thresh = M_PI / 3.0; // 60 degrees
+
     double adaptive_speed = 0.0;
     if (distance > 1e-6) {
-        adaptive_speed = k_speed * std::pow(distance, 1.4);
+        adaptive_speed = k_speed * std::pow(distance, 1.3);
         adaptive_speed = std::min(max_speed_, adaptive_speed);
         if (effective_angle < sharp_turn_thresh) {
             adaptive_speed = std::max(inspection_speed_, adaptive_speed);
@@ -157,20 +161,22 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
 
 Eigen::Vector3d PX4VelController::compute_safe_velocity(const Eigen::Vector3d &desired_velocity, double dt)
 {
+    // Tunable parameters
+    double base_max_acc = 0.1;
+    double acc_gain = 0.04;
+    double max_acc_limit = 4.0;
+    double base_max_jerk = 0.1;
+    double jerk_gain = 0.04;
+    double max_jerk_limit = 4.0;
+
     Eigen::Vector3d velocity_error = desired_velocity - last_velocity_;
     Eigen::Vector3d safe_velocity = last_velocity_ + pid_.compute(velocity_error, dt);
 
-    double base_max_acc = 0.1;
-    double acc_gain = 0.04;
     double speed = last_velocity_.norm();
     double max_acc = base_max_acc + acc_gain * speed * speed;
-    double max_acc_limit = 4.0;
     if (max_acc > max_acc_limit) max_acc = max_acc_limit;
 
-    double base_max_jerk = 0.1;
-    double jerk_gain = 0.04;
     double max_jerk = base_max_jerk + jerk_gain * speed * speed;
-    double max_jerk_limit = 4.0;
     if (max_jerk > max_jerk_limit) max_jerk = max_jerk_limit;
 
     Eigen::Vector3d acc = (safe_velocity - last_velocity_) / dt;
@@ -198,7 +204,11 @@ double PX4VelController::clamp_angle(double angle)
 
 double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw, double dt)
 {
+    // Tunable parameters
+    double max_yawspeed = 0.5;
+    double max_yaw_acc = 0.2;
     static double yaw_kp = 0.3, yaw_ki = 0.0, yaw_kd = 0.5;
+
     static double yaw_integral = 0.0;
     static double last_yaw_error = 0.0;
     static double last_yawspeed = 0.0;
@@ -213,9 +223,7 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
     yaw_integral += yaw_error * dt;
     double yawspeed_cmd = yaw_kp * yaw_error + yaw_ki * yaw_integral + yaw_kd * yaw_derivative;
     last_yaw_error = yaw_error;
-    double max_yawspeed = 0.5;
     yawspeed_cmd = std::clamp(yawspeed_cmd, -max_yawspeed, max_yawspeed);
-    double max_yaw_acc = 0.1;
     double yawspeed_acc = (yawspeed_cmd - last_yawspeed) / dt;
     if (std::abs(yawspeed_acc) > max_yaw_acc)
         yawspeed_cmd = last_yawspeed + std::copysign(max_yaw_acc * dt, yawspeed_acc);
@@ -225,6 +233,9 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
 
 void PX4VelController::timer_callback()
 {
+    // Tunable parameters
+    const int lookahead_points = 5;
+
     nav_msgs::msg::Path::SharedPtr path_copy;
     {
         std::lock_guard<std::mutex> lock(path_mutex_);
@@ -253,7 +264,6 @@ void PX4VelController::timer_callback()
     dir_dot = std::clamp(dir_dot, -1.0, 1.0);
     double angle = std::acos(dir_dot);
 
-    const int lookahead_points = 5;
     Eigen::Vector3d avg_look_dir = Eigen::Vector3d::Zero();
     int avg_count = 0;
     for (int k = 1; k <= lookahead_points; ++k) {
