@@ -25,6 +25,7 @@ public:
         this->declare_parameter<double>("max_speed", 15.0);
         this->declare_parameter<double>("inspection_speed", 1.0);
         this->declare_parameter<double>("max_yaw_to_velocity_angle_deg", 120.0);
+        this->declare_parameter<int>("frequency", 1000);
 
 
         std::string path_topic = this->get_parameter("path_topic").as_string();
@@ -34,6 +35,8 @@ public:
         inspection_speed_ = this->get_parameter("inspection_speed").as_double();
         double max_yaw_to_velocity_angle_deg = this->get_parameter("max_yaw_to_velocity_angle_deg").as_double();
         max_yaw_to_velocity_angle_ = max_yaw_to_velocity_angle_deg * M_PI / 180.0;
+        int frequency = this->get_parameter("frequency").as_int();
+        int ms_per_cycle = 1000 / frequency;
 
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -52,7 +55,7 @@ public:
 
         // Timer at 1ms (1000Hz)
         timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(10), // Should be 1
+            std::chrono::milliseconds(ms_per_cycle),
             std::bind(&PX4VelController::timer_callback, this)
         );
     }
