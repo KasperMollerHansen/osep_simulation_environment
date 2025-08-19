@@ -297,7 +297,7 @@ private:
         yawspeed_cmd = std::clamp(yawspeed_cmd, -max_yawspeed, max_yawspeed);
 
         // Optionally, smooth yawspeed (rate limit)
-        double max_yaw_acc = 0.02; // rad/s^2, tune as needed
+        double max_yaw_acc = 0.05; // rad/s^2, tune as needed
         double yawspeed_acc = (yawspeed_cmd - last_yawspeed) / dt;
         if (std::abs(yawspeed_acc) > max_yaw_acc)
             yawspeed_cmd = last_yawspeed + std::copysign(max_yaw_acc * dt, yawspeed_acc);
