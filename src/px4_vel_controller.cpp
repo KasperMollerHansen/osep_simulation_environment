@@ -380,22 +380,30 @@ void PX4VelController::publish_safe_setpoint(const Eigen::Vector3d& safe_velocit
 
 void PX4VelController::timer_callback()
 {
+    static bool has_valid_pose = false;
     Eigen::Vector3d current_tf_pos;
     double current_tf_yaw;
 
     nav_msgs::msg::Path::SharedPtr path_copy;
-    // Only proceed if both pose and path are valid
-    if (!get_valid_pose(current_tf_pos, current_tf_yaw) ||
-        is_path_timeout() || !get_valid_path(path_copy)) {
+    bool pose_ok = get_valid_pose(current_tf_pos, current_tf_yaw);
+    bool path_ok = !is_path_timeout() && get_valid_path(path_copy);
 
-        publish_safe_setpoint(last_valid_tf_pos_, last_valid_tf_yaw_);
-        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-            "No valid pose or path (timeout or empty), publishing last valid position and yaw.");
+    if (!pose_ok || !path_ok) {
+        if (has_valid_pose) {
+            publish_safe_setpoint(last_valid_tf_pos_, last_valid_tf_yaw_);
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                "No valid pose or path (timeout or empty), publishing last valid position and yaw.");
+        } else {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                "No valid pose received yet, skipping control output.");
+        }
         return;
     }
 
+    // Update last valid pose/yaw only when both are valid
     last_valid_tf_pos_ = current_tf_pos;
     last_valid_tf_yaw_ = current_tf_yaw;
+    has_valid_pose = true;
 
     update_target_indices(path_copy, current_tf_pos);
 
