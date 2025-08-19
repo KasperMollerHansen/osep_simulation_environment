@@ -305,7 +305,7 @@ void PX4VelController::timer_callback()
     Eigen::Vector2d velocity_xy(safe_velocity.x(), safe_velocity.y());
     double velocity_magnitude_xy = velocity_xy.norm();
 
-    if (velocity_magnitude_xy > 0.5) {
+    if (velocity_magnitude_xy > interpolation_distance_/4.0) {
         Eigen::Vector2d velocity_vector = velocity_xy.normalized();
         Eigen::Vector2d yaw_vector(std::cos(target_yaw), std::sin(target_yaw));
         double dot_product = yaw_vector.dot(velocity_vector);
