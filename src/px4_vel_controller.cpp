@@ -24,6 +24,7 @@ public:
         this->declare_parameter<double>("interpolation_distance", 2.0);
         this->declare_parameter<double>("max_speed", 15.0);
         this->declare_parameter<double>("inspection_speed", 1.0);
+        this->declare_parameter<double>("max_yaw_to_velocity_angle_deg", 120.0);
 
 
         std::string path_topic = this->get_parameter("path_topic").as_string();
@@ -31,6 +32,8 @@ public:
         interpolation_distance_ = this->get_parameter("interpolation_distance").as_double();
         max_speed_ = this->get_parameter("max_speed").as_double();
         inspection_speed_ = this->get_parameter("inspection_speed").as_double();
+        double max_yaw_to_velocity_angle_deg = this->get_parameter("max_yaw_to_velocity_angle_deg").as_double();
+        max_yaw_to_velocity_angle_ = max_yaw_to_velocity_angle_deg * M_PI / 180.0;
 
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -69,6 +72,7 @@ private:
     double max_speed_{15.0}; // m/s, tune as needed
     double inspection_speed_{1.0};
     double interpolation_distance_{2.0};
+    double max_yaw_to_velocity_angle_{M_PI / 1.80}; 
 
     size_t target_idx_ = 0;
 
@@ -289,10 +293,51 @@ private:
         static double last_yaw_error = 0.0;
         static double last_yawspeed = 0.0;
 
+        // Extract target yaw from quaternion (as before)
         const auto& target_q = target_pose.pose.orientation;
-        Eigen::Quaterniond target_quat(target_q.w, target_q.x, target_q.y, target_q.z);
-        Eigen::Vector3d target_euler = target_quat.toRotationMatrix().eulerAngles(0, 1, 2);
-        double target_yaw = target_euler[2];
+        tf2::Quaternion tf2_target_quat(target_q.x, target_q.y, target_q.z, target_q.w);
+        double roll_target, pitch_target, target_yaw;
+        tf2::Matrix3x3(tf2_target_quat).getRPY(roll_target, pitch_target, target_yaw);
+
+        // --- Yaw adjustment to limit deviation from velocity direction ---
+        Eigen::Vector2d velocity_xy(safe_velocity.x(), safe_velocity.y());
+        double velocity_magnitude_xy = velocity_xy.norm();
+
+        const double max_yaw_to_velocity_angle_ = M_PI / 1.80; 
+
+        if (velocity_magnitude_xy > 0.5) { // Only adjust if moving enough
+            Eigen::Vector2d velocity_vector = velocity_xy.normalized();
+            Eigen::Vector2d yaw_vector(std::cos(target_yaw), std::sin(target_yaw));
+
+            double dot_product = yaw_vector.dot(velocity_vector);
+            double angle_to_velocity = std::acos(std::clamp(dot_product, -1.0, 1.0));
+
+            if (std::abs(angle_to_velocity) > max_yaw_to_velocity_angle_) {
+                RCLCPP_WARN(this->get_logger(), "Yaw exceeds max allowable offset. Adjusting yaw.");
+
+                // Compute the two possible yaw values
+                double velocity_angle = std::atan2(velocity_vector.y(), velocity_vector.x());
+                double yaw_positive = velocity_angle + max_yaw_to_velocity_angle_;
+                double yaw_negative = velocity_angle - max_yaw_to_velocity_angle_;
+
+                // Normalize angles to [-pi, pi]
+                auto normalizeAngle = [](double angle) {
+                    while (angle > M_PI) angle -= 2.0 * M_PI;
+                    while (angle < -M_PI) angle += 2.0 * M_PI;
+                    return angle;
+                };
+
+                yaw_positive = normalizeAngle(yaw_positive);
+                yaw_negative = normalizeAngle(yaw_negative);
+
+                // Select the yaw value that is closer to the original target_yaw
+                if (std::abs(normalizeAngle(yaw_positive - target_yaw)) < std::abs(normalizeAngle(yaw_negative - target_yaw))) {
+                    target_yaw = yaw_positive;
+                } else {
+                    target_yaw = yaw_negative;
+                }
+            }
+        }
 
         // Compute yaw error (wrap to [-pi, pi])
         double yaw_error = std::atan2(std::sin(target_yaw - current_tf_yaw), std::cos(target_yaw - current_tf_yaw));

@@ -21,6 +21,7 @@ def generate_launch_description():
                 'interpolation_distance': 3.0,  
                 'max_speed': 15.0,
                 'inspection_speed': 2.0,
+                'max_yaw_to_velocity_angle_deg': 120.0,
             }]
         )
     ])
