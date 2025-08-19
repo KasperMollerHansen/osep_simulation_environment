@@ -133,11 +133,11 @@ private:
         double collinear_dot_thresh = 0.995; // Accepts ~8 degrees deviation, tune as needed
         double yaw_thresh = 0.05; // radians, tune as needed
 
-        // Use the yaw of the point at target_idx_ as the reference
+        // Use the yaw of the point at target_idx_ as the initial reference
         const auto& start_q = path_copy->poses[target_idx_].pose.orientation;
         Eigen::Quaterniond start_quat(start_q.w, start_q.x, start_q.y, start_q.z);
         Eigen::Vector3d start_euler = start_quat.toRotationMatrix().eulerAngles(0, 1, 2); // roll, pitch, yaw
-        double start_yaw = start_euler[2];
+        double prev_yaw = start_euler[2]; // <-- Use this as running reference
 
         for (size_t i = target_idx_; i < path_copy->poses.size(); ++i) {
             const auto &pose = path_copy->poses[i];
@@ -149,6 +149,7 @@ private:
             if (i == target_idx_) {
                 furthest_idx = i;
                 prev_pos = pos;
+                prev_yaw = start_euler[2]; // Set running yaw
                 continue;
             }
 
@@ -163,12 +164,13 @@ private:
             Eigen::Vector3d euler = quat.toRotationMatrix().eulerAngles(0, 1, 2); // roll, pitch, yaw
             double pose_yaw = euler[2];
 
-            // Check if yaw is close to start_yaw
-            double yaw_diff = std::fabs(std::atan2(std::sin(pose_yaw - start_yaw), std::cos(pose_yaw - start_yaw)));
+            // Compare to previous accepted yaw
+            double yaw_diff = std::fabs(std::atan2(std::sin(pose_yaw - prev_yaw), std::cos(pose_yaw - prev_yaw)));
 
             if (dot > collinear_dot_thresh && yaw_diff < yaw_thresh) {
                 furthest_idx = i;
                 prev_pos = pos;
+                prev_yaw = pose_yaw; // <-- Update running reference
             } else {
                 if (dot <= collinear_dot_thresh) {
                     RCLCPP_INFO(this->get_logger(), "Break at idx %zu: Not collinear (dot=%.3f <= thresh=%.3f)", i, dot, collinear_dot_thresh);
@@ -250,6 +252,41 @@ private:
 
         last_velocity_ = safe_velocity;
 
+        // --- Yaw control ---
+        // Scalar PID for yaw
+        static double yaw_kp = 1.0, yaw_ki = 0.0, yaw_kd = 0.1;
+        static double yaw_integral = 0.0;
+        static double last_yaw_error = 0.0;
+        static double last_yawspeed = 0.0;
+
+        const auto& target_q = target_pose.pose.orientation;
+        Eigen::Quaterniond target_quat(target_q.w, target_q.x, target_q.y, target_q.z);
+        Eigen::Vector3d target_euler = target_quat.toRotationMatrix().eulerAngles(0, 1, 2);
+        double target_yaw = target_euler[2];
+
+        // Compute yaw error (wrap to [-pi, pi])
+        double yaw_error = std::atan2(std::sin(target_yaw - current_tf_yaw), std::cos(target_yaw - current_tf_yaw));
+
+        // Scalar PID for yawspeed
+        yaw_integral += yaw_error * dt;
+        double yaw_derivative = (yaw_error - last_yaw_error) / dt;
+        double yawspeed_cmd = yaw_kp * yaw_error + yaw_ki * yaw_integral + yaw_kd * yaw_derivative;
+        last_yaw_error = yaw_error;
+
+        // Clamp yawspeed
+        double max_yawspeed = 0.1; // rad/s, tune as needed
+        yawspeed_cmd = std::clamp(yawspeed_cmd, -max_yawspeed, max_yawspeed);
+
+        // Optionally, smooth yawspeed (rate limit)
+        double max_yaw_acc = 0.01; // rad/s^2, tune as needed
+        double yawspeed_acc = (yawspeed_cmd - last_yawspeed) / dt;
+        if (std::abs(yawspeed_acc) > max_yaw_acc)
+            yawspeed_cmd = last_yawspeed + std::copysign(max_yaw_acc * dt, yawspeed_acc);
+
+        last_yawspeed = yawspeed_cmd;
+
+        RCLCPP_INFO(this->get_logger(), "Yawspeed: %.3f rad/s", yawspeed_cmd);
+
 
         // Publish the safe velocity
         px4_msgs::msg::TrajectorySetpoint msg;
@@ -259,8 +296,13 @@ private:
         msg.velocity[1] = static_cast<float>(safe_velocity.y());
         msg.velocity[2] = static_cast<float>(safe_velocity.z());
 
+        msg.acceleration[0] = static_cast<float>(acc.x());
+        msg.acceleration[1] = static_cast<float>(acc.y());
+        msg.acceleration[2] = static_cast<float>(acc.z());
+
+
         msg.yaw = NAN;
-        msg.yawspeed = 0.0;
+        msg.yawspeed = yawspeed_cmd;
         vel_pub_->publish(msg);
     }
 };
