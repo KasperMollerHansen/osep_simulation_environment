@@ -201,7 +201,7 @@ private:
             diff.x(), diff.y(), diff.z());
 
         // --- Adaptive speed based on distance ---
-        double k_speed = 0.2; // Tune this gain as needed
+        double k_speed = 0.5; // Tune this gain as needed
         double adaptive_speed = std::min(max_speed_, k_speed * distance);
         adaptive_speed = std::max(min_speed_, adaptive_speed);
 
@@ -262,7 +262,7 @@ private:
 
         // --- Yaw control ---
         // Scalar PID for yaw
-        static double yaw_kp = 1.0, yaw_ki = 0.0, yaw_kd = 0.2;
+        static double yaw_kp = 0.5, yaw_ki = 0.0, yaw_kd = 0.2;
         static double yaw_integral = 0.0;
         static double last_yaw_error = 0.0;
         static double last_yawspeed = 0.0;
@@ -293,7 +293,7 @@ private:
         last_yaw_error = yaw_error;
 
         // Clamp yawspeed
-        double max_yawspeed = 0.1; // rad/s, tune as needed
+        double max_yawspeed = 0.2; // rad/s, tune as needed
         yawspeed_cmd = std::clamp(yawspeed_cmd, -max_yawspeed, max_yawspeed);
 
         // Optionally, smooth yawspeed (rate limit)
