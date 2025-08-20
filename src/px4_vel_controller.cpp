@@ -367,12 +367,12 @@ void PX4VelController::publish_vel_setpoint(const Eigen::Vector3d& safe_velocity
     vel_pub_->publish(msg);
 }
 
-void PX4VelController::publish_safe_setpoint(const Eigen::Vector3d& safe_velocity, double yaw_cmd)
+void PX4VelController::publish_safe_setpoint(const Eigen::Vector3d& safe_setpoint, double yaw_cmd)
 {
     px4_msgs::msg::TrajectorySetpoint msg;
-    msg.position[0] = static_cast<float>(safe_velocity.x());
-    msg.position[1] = static_cast<float>(safe_velocity.y());
-    msg.position[2] = static_cast<float>(safe_velocity.z());
+    msg.position[0] = static_cast<float>(safe_setpoint.x());
+    msg.position[1] = static_cast<float>(safe_setpoint.y());
+    msg.position[2] = static_cast<float>(safe_setpoint.z());
 
     msg.yaw = static_cast<float>(yaw_cmd);
     vel_pub_->publish(msg);
