@@ -215,7 +215,7 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
     // Tunable parameters
     double max_yawspeed = 0.5;
     double max_yaw_acc = 10.0;
-    static double yaw_kp = 2.5, yaw_ki = 0.0, yaw_kd = 0.2;
+    static double yaw_kp = 2.0, yaw_ki = 0.0, yaw_kd = 0.5;
 
     static double yaw_integral = 0.0;
     static double last_yaw_error = 0.0;
