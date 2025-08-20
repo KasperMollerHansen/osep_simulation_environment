@@ -7,7 +7,7 @@
 
 PX4VelController::PX4VelController()
 : Node("px4_vel_controller"),
-  pid_(0.3, 0.0, 0.2),
+  vel_pid_(0.3, 0.0, 0.2),
   last_velocity_(Eigen::Vector3d::Zero()),
   last_acc_(Eigen::Vector3d::Zero()),
   target_idx_(0)
@@ -172,8 +172,9 @@ Eigen::Vector3d PX4VelController::compute_safe_velocity(const Eigen::Vector3d &d
     double jerk_gain = 0.04;
     double max_jerk_limit = 4.0;
 
+    // Velocity PID
     Eigen::Vector3d velocity_error = desired_velocity - last_velocity_;
-    Eigen::Vector3d safe_velocity = last_velocity_ + pid_.compute(velocity_error, dt);
+    Eigen::Vector3d safe_velocity = last_velocity_ + vel_pid_.compute(velocity_error, dt);
 
     double speed = last_velocity_.norm();
     double max_acc = base_max_acc + acc_gain * speed * speed;
@@ -187,12 +188,16 @@ Eigen::Vector3d PX4VelController::compute_safe_velocity(const Eigen::Vector3d &d
         if (std::abs(acc[i]) > max_acc)
             acc[i] = std::copysign(max_acc, acc[i]);
     }
+
+    // Jerk limiting
     Eigen::Vector3d jerk = (acc - last_acc_) / dt;
     for (int i = 0; i < 3; ++i) {
         if (std::abs(jerk[i]) > max_jerk)
             acc[i] = last_acc_[i] + std::copysign(max_jerk * dt, jerk[i]);
     }
+
     safe_velocity = last_velocity_ + acc * dt;
+
     last_acc_ = acc;
     last_velocity_ = safe_velocity;
     return safe_velocity;

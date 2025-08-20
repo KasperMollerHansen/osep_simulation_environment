@@ -24,7 +24,7 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
 
     // State
-    PIDController pid_;
+    PIDController vel_pid_;
     Eigen::Vector3d last_velocity_;
     Eigen::Vector3d last_acc_;
     rclcpp::Time last_time_;
