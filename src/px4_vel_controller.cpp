@@ -7,7 +7,7 @@
 
 PX4VelController::PX4VelController()
 : Node("px4_vel_controller"),
-  pid_(0.3, 0.0, 0.2),
+  vel_pid_(0.3, 0.0, 0.2),
   last_velocity_(Eigen::Vector3d::Zero()),
   last_acc_(Eigen::Vector3d::Zero()),
   target_idx_(0)
@@ -172,8 +172,9 @@ Eigen::Vector3d PX4VelController::compute_safe_velocity(const Eigen::Vector3d &d
     double jerk_gain = 0.04;
     double max_jerk_limit = 4.0;
 
+    // Velocity PID
     Eigen::Vector3d velocity_error = desired_velocity - last_velocity_;
-    Eigen::Vector3d safe_velocity = last_velocity_ + pid_.compute(velocity_error, dt);
+    Eigen::Vector3d safe_velocity = last_velocity_ + vel_pid_.compute(velocity_error, dt);
 
     double speed = last_velocity_.norm();
     double max_acc = base_max_acc + acc_gain * speed * speed;
@@ -187,12 +188,16 @@ Eigen::Vector3d PX4VelController::compute_safe_velocity(const Eigen::Vector3d &d
         if (std::abs(acc[i]) > max_acc)
             acc[i] = std::copysign(max_acc, acc[i]);
     }
+
+    // Jerk limiting
     Eigen::Vector3d jerk = (acc - last_acc_) / dt;
     for (int i = 0; i < 3; ++i) {
         if (std::abs(jerk[i]) > max_jerk)
             acc[i] = last_acc_[i] + std::copysign(max_jerk * dt, jerk[i]);
     }
+
     safe_velocity = last_velocity_ + acc * dt;
+
     last_acc_ = acc;
     last_velocity_ = safe_velocity;
     return safe_velocity;
@@ -208,9 +213,9 @@ double PX4VelController::clamp_angle(double angle)
 double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw, double dt)
 {
     // Tunable parameters
-    double max_yawspeed = 0.5;
-    double max_yaw_acc = 0.2;
-    static double yaw_kp = 0.6, yaw_ki = 0.0, yaw_kd = 1.0;
+    double max_yawspeed = 0.25;
+    double max_yaw_acc = 10.0;
+    static double yaw_kp = 2.0, yaw_ki = 0.0, yaw_kd = 0.5;
 
     static double yaw_integral = 0.0;
     static double last_yaw_error = 0.0;
@@ -235,7 +240,7 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
 }
 
 bool PX4VelController::is_path_timeout() {
-    const double path_timeout_sec = 1.0;
+    const double path_timeout_sec = 5.0;
     return (this->now() - last_path_time_).seconds() > path_timeout_sec;
 }
 
@@ -304,6 +309,16 @@ Eigen::Vector3d PX4VelController::calculate_safe_velocity(
 
     Eigen::Vector3d safe_velocity = compute_safe_velocity(velocity_world, dt);
 
+    // --- CAP SAFE_VELOCITY BASED ON PATH DIRECTION ---
+    if (distance > 10 * interpolation_distance_) {
+        // Project safe_velocity onto desired_dir
+        double along_path = safe_velocity.dot(desired_dir);
+        // Clamp to [-adaptive_speed, adaptive_speed]
+        along_path = std::clamp(along_path, -adaptive_speed, adaptive_speed);
+        // Remove perpendicular component if you want strict following:
+        safe_velocity = desired_dir * along_path;
+    }
+
     RCLCPP_INFO(this->get_logger(), "Safe Velocity: [%.2f, %.2f, %.2f]", safe_velocity.x(), safe_velocity.y(), safe_velocity.z());
     return safe_velocity;
 }
@@ -358,21 +373,21 @@ void PX4VelController::publish_vel_setpoint(const Eigen::Vector3d& safe_velocity
     msg.velocity[0] = static_cast<float>(safe_velocity.x());
     msg.velocity[1] = static_cast<float>(safe_velocity.y());
     msg.velocity[2] = static_cast<float>(safe_velocity.z());
-    msg.acceleration[0] = static_cast<float>(last_acc_.x());
-    msg.acceleration[1] = static_cast<float>(last_acc_.y());
-    msg.acceleration[2] = static_cast<float>(last_acc_.z());
+    // msg.acceleration[0] = static_cast<float>(last_acc_.x());
+    // msg.acceleration[1] = static_cast<float>(last_acc_.y());
+    // msg.acceleration[2] = static_cast<float>(last_acc_.z());
 
     msg.yaw = NAN;
     msg.yawspeed = static_cast<float>(yawspeed_cmd);
     vel_pub_->publish(msg);
 }
 
-void PX4VelController::publish_safe_setpoint(const Eigen::Vector3d& safe_velocity, double yaw_cmd)
+void PX4VelController::publish_safe_setpoint(const Eigen::Vector3d& safe_setpoint, double yaw_cmd)
 {
     px4_msgs::msg::TrajectorySetpoint msg;
-    msg.position[0] = static_cast<float>(safe_velocity.x());
-    msg.position[1] = static_cast<float>(safe_velocity.y());
-    msg.position[2] = static_cast<float>(safe_velocity.z());
+    msg.position[0] = static_cast<float>(safe_setpoint.x());
+    msg.position[1] = static_cast<float>(safe_setpoint.y());
+    msg.position[2] = static_cast<float>(safe_setpoint.z());
 
     msg.yaw = static_cast<float>(yaw_cmd);
     vel_pub_->publish(msg);

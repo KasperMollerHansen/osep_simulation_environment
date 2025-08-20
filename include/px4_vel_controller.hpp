@@ -24,7 +24,7 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
 
     // State
-    PIDController pid_;
+    PIDController vel_pid_;
     Eigen::Vector3d last_velocity_;
     Eigen::Vector3d last_acc_;
     rclcpp::Time last_time_;
@@ -59,5 +59,5 @@ private:
     Eigen::Vector3d calculate_safe_velocity(const nav_msgs::msg::Path::SharedPtr& path, const Eigen::Vector3d& current_tf_pos, double& effective_angle);
     void calculate_yaw(const nav_msgs::msg::Path::SharedPtr& path, const Eigen::Vector3d& safe_velocity, const Eigen::Vector3d& current_tf_pos, double& target_yaw, double& yawspeed_cmd, double current_tf_yaw);
     void publish_vel_setpoint(const Eigen::Vector3d& safe_velocity, double yawspeed_cmd);
-    void publish_safe_setpoint(const Eigen::Vector3d& safe_velocity, double yaw_cmd);
+    void publish_safe_setpoint(const Eigen::Vector3d& safe_setpoint, double yaw_cmd);
 };

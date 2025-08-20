@@ -19,7 +19,7 @@ def generate_launch_description():
                 'path_topic': '/planner/smoothed_path',
                 'osep_vel_cmd': '/osep/vel_cmd',
                 'interpolation_distance': 2.0,  
-                'max_speed': 25.0,
+                'max_speed': 15.0,
                 'inspection_speed': 2.0,
                 'max_yaw_to_velocity_angle_deg': 120.0,
                 'frequency': 100
