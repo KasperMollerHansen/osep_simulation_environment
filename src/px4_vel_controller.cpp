@@ -8,6 +8,7 @@
 PX4VelController::PX4VelController()
 : Node("px4_vel_controller"),
   vel_pid_(0.3, 0.0, 0.2),
+  yaw_pid_(2.0, 0.0, 0.5),
   last_velocity_(Eigen::Vector3d::Zero()),
   last_acc_(Eigen::Vector3d::Zero()),
   target_idx_(0)
@@ -212,26 +213,23 @@ double PX4VelController::clamp_angle(double angle)
 
 double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw, double dt)
 {
-    // Tunable parameters
     double max_yawspeed = 0.25;
     double max_yaw_acc = 10.0;
-    static double yaw_kp = 2.0, yaw_ki = 0.0, yaw_kd = 0.5;
 
-    static double yaw_integral = 0.0;
-    static double last_yaw_error = 0.0;
     static double last_yawspeed = 0.0;
-
     double yaw_error = std::atan2(std::sin(target_yaw - current_yaw), std::cos(target_yaw - current_yaw));
-    double yaw_derivative = (yaw_error - last_yaw_error) / dt;
+
+    // Reset PID if error wraps
+    static double last_yaw_error = 0.0;
     if (std::abs(yaw_error - last_yaw_error) > M_PI) {
-        yaw_integral = 0.0;
-        yaw_derivative = 0.0;
-        RCLCPP_WARN(this->get_logger(), "Yaw error wrap detected, resetting integral and derivative.");
+        yaw_pid_.reset();
+        RCLCPP_WARN(this->get_logger(), "Yaw error wrap detected, resetting PID.");
     }
-    yaw_integral += yaw_error * dt;
-    double yawspeed_cmd = yaw_kp * yaw_error + yaw_ki * yaw_integral + yaw_kd * yaw_derivative;
     last_yaw_error = yaw_error;
+
+    double yawspeed_cmd = yaw_pid_.compute(yaw_error, dt);
     yawspeed_cmd = std::clamp(yawspeed_cmd, -max_yawspeed, max_yawspeed);
+
     double yawspeed_acc = (yawspeed_cmd - last_yawspeed) / dt;
     if (std::abs(yawspeed_acc) > max_yaw_acc)
         yawspeed_cmd = last_yawspeed + std::copysign(max_yaw_acc * dt, yawspeed_acc);
