@@ -215,7 +215,7 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
     // Tunable parameters
     double max_yawspeed = 0.5;
     double max_yaw_acc = 0.2;
-    static double yaw_kp = 0.6, yaw_ki = 0.0, yaw_kd = 1.0;
+    static double yaw_kp = 1.5, yaw_ki = 0.0, yaw_kd = 0.2;
 
     static double yaw_integral = 0.0;
     static double last_yaw_error = 0.0;
@@ -240,7 +240,7 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
 }
 
 bool PX4VelController::is_path_timeout() {
-    const double path_timeout_sec = 1.0;
+    const double path_timeout_sec = 5.0;
     return (this->now() - last_path_time_).seconds() > path_timeout_sec;
 }
 
