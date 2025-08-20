@@ -309,6 +309,16 @@ Eigen::Vector3d PX4VelController::calculate_safe_velocity(
 
     Eigen::Vector3d safe_velocity = compute_safe_velocity(velocity_world, dt);
 
+    // --- CAP SAFE_VELOCITY BASED ON PATH DIRECTION ---
+    if (distance > 10 * interpolation_distance_) {
+        // Project safe_velocity onto desired_dir
+        double along_path = safe_velocity.dot(desired_dir);
+        // Clamp to [-adaptive_speed, adaptive_speed]
+        along_path = std::clamp(along_path, -adaptive_speed, adaptive_speed);
+        // Remove perpendicular component if you want strict following:
+        safe_velocity = desired_dir * along_path;
+    }
+
     RCLCPP_INFO(this->get_logger(), "Safe Velocity: [%.2f, %.2f, %.2f]", safe_velocity.x(), safe_velocity.y(), safe_velocity.z());
     return safe_velocity;
 }
