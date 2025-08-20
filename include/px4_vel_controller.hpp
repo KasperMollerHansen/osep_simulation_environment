@@ -40,6 +40,9 @@ private:
     rclcpp::Time last_path_time_;
     Eigen::Vector3d last_valid_tf_pos_;
     double last_valid_tf_yaw_;
+    bool in_turn_ = false;
+    rclcpp::Time last_turn_time_;
+    double turn_hold_duration_ = 1.0;
 
     // Callbacks
     void path_callback(const nav_msgs::msg::Path::SharedPtr msg);
@@ -61,4 +64,5 @@ private:
     void calculate_yaw(const nav_msgs::msg::Path::SharedPtr& path, const Eigen::Vector3d& safe_velocity, const Eigen::Vector3d& current_tf_pos, double& target_yaw, double& yawspeed_cmd, double current_tf_yaw);
     void publish_vel_setpoint(const Eigen::Vector3d& safe_velocity, double yawspeed_cmd);
     void publish_safe_setpoint(const Eigen::Vector3d& safe_setpoint, double yaw_cmd);
+    double turn_detection(const nav_msgs::msg::Path::SharedPtr& path, size_t target_idx, const Eigen::Vector3d& current_tf_pos, int lookahead_points);
 };

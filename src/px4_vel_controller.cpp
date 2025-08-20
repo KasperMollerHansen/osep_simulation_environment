@@ -54,6 +54,10 @@ PX4VelController::PX4VelController()
     last_path_time_ = this->now();
 }
 
+double sigmoid(double x, double min_val, double max_val, double k, double x0) {
+    return min_val + (max_val - min_val) / (1.0 + std::exp(-k * (x - x0)));
+}
+
 void PX4VelController::path_callback(const nav_msgs::msg::Path::SharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(path_mutex_);
@@ -148,53 +152,69 @@ size_t PX4VelController::find_furthest_collinear_idx(const nav_msgs::msg::Path::
 
 double PX4VelController::compute_adaptive_speed(double distance, double effective_angle)
 {
-    // Tunable parameters
-    double k_speed = 0.15;
-    double sharp_turn_thresh = M_PI / 3.0; // 60 degrees
+    static const double turn_hold_duration = 5.0 * inspection_speed_;
+    static bool in_turn = false;
+    static rclcpp::Time last_turn_time;
+
+    double slope = 0.15;
+    double sharp_turn_thresh = M_PI / 4.0; // 45 degrees
 
     double adaptive_speed = 0.0;
+    rclcpp::Time now = this->now();
+
+    // Hysteresis: stay in "turn" for a while after angle drops
+    if (effective_angle >= sharp_turn_thresh) {
+        in_turn = true;
+        last_turn_time = now;
+    } else if (in_turn && (now - last_turn_time).seconds() < turn_hold_duration) {
+        // Stay in turn for hold duration
+        // in_turn remains true
+    } else {
+        in_turn = false;
+    }
+
     if (distance > 1e-6) {
-        adaptive_speed = k_speed * std::pow(distance, 1.3);
+        adaptive_speed = slope * distance;
         adaptive_speed = std::min(max_speed_, adaptive_speed);
-        if (effective_angle < sharp_turn_thresh) {
+        if (!in_turn) {
             adaptive_speed = std::max(inspection_speed_, adaptive_speed);
         }
     }
+    RCLCPP_INFO(this->get_logger(), "Adaptive speed: %f", adaptive_speed);
     return adaptive_speed;
 }
 
 Eigen::Vector3d PX4VelController::compute_safe_velocity(const Eigen::Vector3d &desired_velocity, double dt)
 {
-    // Tunable parameters
-    double base_max_acc = 0.1;
-    double acc_gain = 0.04;
-    double max_acc_limit = 4.0;
-    double base_max_jerk = 0.1;
-    double jerk_gain = 0.04;
-    double max_jerk_limit = 4.0;
+    // Sigmoid parameters for acceleration
+    double min_acc = 0.05;
+    double max_acc = 3.5;
+    double acc_k = 0.6;
+    double acc_x0 = 8.0;
 
-    // Velocity PID
+    // Sigmoid parameters for jerk
+    double min_jerk = 0.05;
+    double max_jerk = 3.5;
+    double jerk_k = 0.6;
+    double jerk_x0 = 8.0;
+
     Eigen::Vector3d velocity_error = desired_velocity - last_velocity_;
     Eigen::Vector3d safe_velocity = last_velocity_ + vel_pid_.compute(velocity_error, dt);
 
     double speed = last_velocity_.norm();
-    double max_acc = base_max_acc + acc_gain * speed * speed;
-    if (max_acc > max_acc_limit) max_acc = max_acc_limit;
-
-    double max_jerk = base_max_jerk + jerk_gain * speed * speed;
-    if (max_jerk > max_jerk_limit) max_jerk = max_jerk_limit;
+    double max_acc_sigmoid = sigmoid(speed, min_acc, max_acc, acc_k, acc_x0);
+    double max_jerk_sigmoid = sigmoid(speed, min_jerk, max_jerk, jerk_k, jerk_x0);
 
     Eigen::Vector3d acc = (safe_velocity - last_velocity_) / dt;
     for (int i = 0; i < 3; ++i) {
-        if (std::abs(acc[i]) > max_acc)
-            acc[i] = std::copysign(max_acc, acc[i]);
+        if (std::abs(acc[i]) > max_acc_sigmoid)
+            acc[i] = std::copysign(max_acc_sigmoid, acc[i]);
     }
 
-    // Jerk limiting
     Eigen::Vector3d jerk = (acc - last_acc_) / dt;
     for (int i = 0; i < 3; ++i) {
-        if (std::abs(jerk[i]) > max_jerk)
-            acc[i] = last_acc_[i] + std::copysign(max_jerk * dt, jerk[i]);
+        if (std::abs(jerk[i]) > max_jerk_sigmoid)
+            acc[i] = last_acc_[i] + std::copysign(max_jerk_sigmoid * dt, jerk[i]);
     }
 
     safe_velocity = last_velocity_ + acc * dt;
@@ -213,7 +233,7 @@ double PX4VelController::clamp_angle(double angle)
 
 double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw, double dt)
 {
-    double max_yawspeed = 0.25;
+    double max_yawspeed = 0.10;
     double max_yaw_acc = 10.0;
 
     static double last_yawspeed = 0.0;
@@ -230,9 +250,11 @@ double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw,
     double yawspeed_cmd = yaw_pid_.compute(yaw_error, dt);
     yawspeed_cmd = std::clamp(yawspeed_cmd, -max_yawspeed, max_yawspeed);
 
+    double adaptive_yaw_acc = std::max(max_yaw_acc, 2.0 * std::abs(yawspeed_cmd - last_yawspeed) / dt);
     double yawspeed_acc = (yawspeed_cmd - last_yawspeed) / dt;
-    if (std::abs(yawspeed_acc) > max_yaw_acc)
-        yawspeed_cmd = last_yawspeed + std::copysign(max_yaw_acc * dt, yawspeed_acc);
+    if (std::abs(yawspeed_acc) > adaptive_yaw_acc)
+        yawspeed_cmd = last_yawspeed + std::copysign(adaptive_yaw_acc * dt, yawspeed_acc);
+
     last_yawspeed = yawspeed_cmd;
     return yawspeed_cmd;
 }
@@ -258,48 +280,78 @@ void PX4VelController::update_target_indices(const nav_msgs::msg::Path::SharedPt
     target_idx_ = find_furthest_collinear_idx(path, target_idx_, current_tf_pos, ref_yaw);
 }
 
+double PX4VelController::turn_detection(
+    const nav_msgs::msg::Path::SharedPtr& path,
+    size_t target_idx,
+    const Eigen::Vector3d& current_tf_pos,
+    int lookahead_points)
+{
+    // If we are far from any turn, just set angle to 0 for stability
+    if (static_cast<int>(target_idx) > 2 * lookahead_points) {
+        return 0.0;
+    }
+
+    int lookahead_base_idx = static_cast<int>(target_idx) - lookahead_points;
+    if (lookahead_base_idx < 0) lookahead_base_idx = 0;
+
+    Eigen::Vector3d avg_look_dir = Eigen::Vector3d::Zero();
+    int avg_count = 0;
+    Eigen::Vector3d prev_pos(
+        path->poses[lookahead_base_idx].pose.position.x,
+        path->poses[lookahead_base_idx].pose.position.y,
+        path->poses[lookahead_base_idx].pose.position.z
+    );
+
+    for (int k = 1; k <= lookahead_points; ++k) {
+        size_t idx = static_cast<size_t>(lookahead_base_idx + k);
+        if (idx < path->poses.size()) {
+            const auto& next_pose = path->poses[idx];
+            Eigen::Vector3d next_pos(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z);
+            Eigen::Vector3d look_dir = (next_pos - prev_pos);
+            if (look_dir.norm() < 1e-6) continue;
+            avg_look_dir += look_dir.normalized();
+            avg_count++;
+            prev_pos = next_pos;
+        }
+    }
+    if (avg_count > 0) {
+        avg_look_dir.normalize();
+        Eigen::Vector3d target_pos(
+            path->poses[target_idx].pose.position.x,
+            path->poses[target_idx].pose.position.y,
+            path->poses[target_idx].pose.position.z
+        );
+        Eigen::Vector3d desired_dir = (target_pos - current_tf_pos).normalized();
+        if (desired_dir.dot(avg_look_dir) < 0) {
+            avg_look_dir = -avg_look_dir;
+        }
+        double avg_dot = desired_dir.dot(avg_look_dir);
+        avg_dot = std::clamp(avg_dot, -1.0, 1.0);
+        return std::acos(avg_dot);
+    }
+    return 0.0;
+}
+
 Eigen::Vector3d PX4VelController::calculate_safe_velocity(
     const nav_msgs::msg::Path::SharedPtr& path,
     const Eigen::Vector3d& current_tf_pos,
     double& effective_angle)
 {
-    const int lookahead_points = 5;
+    // Use target_idx_ for both path following and turn anticipation
+    const int lookahead_points = 20 / interpolation_distance_;
+
+    // Calculate effective angle using the turn_detection helper
+    effective_angle = turn_detection(path, target_idx_, current_tf_pos, lookahead_points);
+    RCLCPP_INFO(this->get_logger(), "Effective Angle: %.2f", effective_angle);
+
+    // Path following using target_idx_
     const auto &target_pose = path->poses[target_idx_];
     Eigen::Vector3d target_pos(target_pose.pose.position.x, target_pose.pose.position.y, target_pose.pose.position.z);
-    Eigen::Vector3d diff = target_pos - current_tf_pos;
-    double distance = diff.norm();
-    RCLCPP_INFO(this->get_logger(), "Position Diff: [%.2f, %.2f, %.2f]", diff.x(), diff.y(), diff.z());
+    Eigen::Vector3d follow_dir = (target_pos - current_tf_pos).normalized();
 
-    Eigen::Vector3d desired_dir = diff.normalized();
-    double current_speed = last_velocity_.norm();
-    Eigen::Vector3d current_dir = (current_speed > 1e-3) ? last_velocity_.normalized() : desired_dir;
-    double dir_dot = desired_dir.dot(current_dir);
-    dir_dot = std::clamp(dir_dot, -1.0, 1.0);
-    double angle = std::acos(dir_dot);
-
-    Eigen::Vector3d avg_look_dir = Eigen::Vector3d::Zero();
-    int avg_count = 0;
-    for (int k = 1; k <= lookahead_points; ++k) {
-        if (target_idx_ + k < path->poses.size()) {
-            const auto& next_pose = path->poses[target_idx_ + k];
-            Eigen::Vector3d next_pos(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z);
-            Eigen::Vector3d look_dir = (next_pos - target_pos);
-            if (look_dir.norm() < 1e-6) continue;
-            avg_look_dir += look_dir.normalized();
-            avg_count++;
-        }
-    }
-    effective_angle = angle;
-    if (avg_count > 0) {
-        avg_look_dir.normalize();
-        double avg_dot = desired_dir.dot(avg_look_dir);
-        avg_dot = std::clamp(avg_dot, -1.0, 1.0);
-        double avg_lookahead_angle = std::acos(avg_dot);
-        effective_angle = std::max(angle, avg_lookahead_angle);
-    }
-
+    double distance = (target_pos - current_tf_pos).norm();
     double adaptive_speed = compute_adaptive_speed(distance, effective_angle);
-    Eigen::Vector3d velocity_world = desired_dir * adaptive_speed;
+    Eigen::Vector3d velocity_world = follow_dir * adaptive_speed;
 
     rclcpp::Time now = this->now();
     double dt = last_time_.nanoseconds() > 0 ? (now - last_time_).seconds() : 0.01;
@@ -309,12 +361,10 @@ Eigen::Vector3d PX4VelController::calculate_safe_velocity(
 
     // --- CAP SAFE_VELOCITY BASED ON PATH DIRECTION ---
     if (distance > 10 * interpolation_distance_) {
-        // Project safe_velocity onto desired_dir
-        double along_path = safe_velocity.dot(desired_dir);
-        // Clamp to [-adaptive_speed, adaptive_speed]
+        // Project safe_velocity onto follow_dir
+        double along_path = safe_velocity.dot(follow_dir);
         along_path = std::clamp(along_path, -adaptive_speed, adaptive_speed);
-        // Remove perpendicular component if you want strict following:
-        safe_velocity = desired_dir * along_path;
+        safe_velocity = follow_dir * along_path;
     }
 
     RCLCPP_INFO(this->get_logger(), "Safe Velocity: [%.2f, %.2f, %.2f]", safe_velocity.x(), safe_velocity.y(), safe_velocity.z());
