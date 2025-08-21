@@ -152,12 +152,12 @@ size_t PX4VelController::find_furthest_collinear_idx(const nav_msgs::msg::Path::
 
 double PX4VelController::compute_adaptive_speed(double distance, double effective_angle)
 {
-    static const double turn_hold_duration = 5.0 * inspection_speed_;
+    static const double turn_hold_duration = 3.0 * inspection_speed_ * interpolation_distance_; // 12 seconds for 2 m/s and 2 m
     static bool in_turn = false;
     static rclcpp::Time last_turn_time;
 
     double slope = 0.15;
-    double sharp_turn_thresh = M_PI / 4.0; // 45 degrees
+    double sharp_turn_thresh = M_PI / 6.0; // 30 degrees
 
     double adaptive_speed = 0.0;
     rclcpp::Time now = this->now();
@@ -180,7 +180,7 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
             adaptive_speed = std::max(inspection_speed_, adaptive_speed);
         }
     }
-    RCLCPP_INFO(this->get_logger(), "Adaptive speed: %f", adaptive_speed);
+    // RCLCPP_INFO(this->get_logger(), "Adaptive speed: %f", adaptive_speed);
     return adaptive_speed;
 }
 
@@ -338,11 +338,11 @@ Eigen::Vector3d PX4VelController::calculate_safe_velocity(
     double& effective_angle)
 {
     // Use target_idx_ for both path following and turn anticipation
-    const int lookahead_points = 20 / interpolation_distance_;
+    const int lookahead_points = 6 * inspection_speed_ / interpolation_distance_;
 
     // Calculate effective angle using the turn_detection helper
     effective_angle = turn_detection(path, target_idx_, current_tf_pos, lookahead_points);
-    RCLCPP_INFO(this->get_logger(), "Effective Angle: %.2f", effective_angle);
+    // RCLCPP_INFO(this->get_logger(), "Effective Angle: %.2f", effective_angle);
 
     // Path following using target_idx_
     const auto &target_pose = path->poses[target_idx_];
@@ -367,7 +367,7 @@ Eigen::Vector3d PX4VelController::calculate_safe_velocity(
         safe_velocity = follow_dir * along_path;
     }
 
-    RCLCPP_INFO(this->get_logger(), "Safe Velocity: [%.2f, %.2f, %.2f]", safe_velocity.x(), safe_velocity.y(), safe_velocity.z());
+    // RCLCPP_INFO(this->get_logger(), "Safe Velocity: [%.2f, %.2f, %.2f]", safe_velocity.x(), safe_velocity.y(), safe_velocity.z());
     return safe_velocity;
 }
 
@@ -409,9 +409,9 @@ void PX4VelController::calculate_yaw(
     double dt = last_time_.nanoseconds() > 0 ? (this->now() - last_time_).seconds() : 0.01;
     yawspeed_cmd = compute_yawspeed(target_yaw, current_tf_yaw, dt);
 
-    RCLCPP_INFO(this->get_logger(), "Current Yaw: %.3f, Target Yaw: %.3f, Yaw Error: %.3f",
-        current_tf_yaw, target_yaw, std::atan2(std::sin(target_yaw - current_tf_yaw), std::cos(target_yaw - current_tf_yaw)));
-    RCLCPP_INFO(this->get_logger(), "Yawspeed: %.3f rad/s", yawspeed_cmd);
+    // RCLCPP_INFO(this->get_logger(), "Current Yaw: %.3f, Target Yaw: %.3f, Yaw Error: %.3f",
+    //     current_tf_yaw, target_yaw, std::atan2(std::sin(target_yaw - current_tf_yaw), std::cos(target_yaw - current_tf_yaw)));
+    // RCLCPP_INFO(this->get_logger(), "Yawspeed: %.3f rad/s", yawspeed_cmd);
 }
 
 void PX4VelController::publish_vel_setpoint(const Eigen::Vector3d& safe_velocity, double yawspeed_cmd)
