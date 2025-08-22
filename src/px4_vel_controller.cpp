@@ -170,8 +170,9 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
         in_turn = true;
         last_turn_time = now;
     } else if (in_turn && (now - last_turn_time).seconds() < turn_hold_duration) {
-        // Stay in turn for hold duration
-        // in_turn remains true
+        double time_left = turn_hold_duration - (now - last_turn_time).seconds();
+        RCLCPP_INFO(this->get_logger(), "Time until full speed: %.2f s", time_left);
+        RCLCPP_WARN(this->get_logger(), "Turning detected, lowering speed (effective_angle=%.2f deg)", effective_angle * 180.0 / M_PI);
     } else {
         in_turn = false;
     }
@@ -183,7 +184,6 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
             adaptive_speed = std::max(inspection_speed_, adaptive_speed);
         }
         else {
-            RCLCPP_WARN(this->get_logger(), "Turning detected, lowering speed (effective_angle=%.2f deg)", effective_angle * 180.0 / M_PI);
         }
     }
     // RCLCPP_INFO(this->get_logger(), "Adaptive speed: %f", adaptive_speed);
