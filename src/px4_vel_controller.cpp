@@ -155,7 +155,7 @@ size_t PX4VelController::find_furthest_collinear_idx(const nav_msgs::msg::Path::
 
 double PX4VelController::compute_adaptive_speed(double distance, double effective_angle)
 {
-    static const double turn_hold_duration = std::min(3.0 * inspection_speed_ * interpolation_distance_, 20.0);
+    static double turn_hold_duration = 0.0;
     static bool in_turn = false;
     static rclcpp::Time last_turn_time;
 
@@ -167,9 +167,11 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
 
     // Hysteresis: stay in "turn" for a while after angle drops
     if (effective_angle >= sharp_turn_thresh) {
+        double angle_deg = effective_angle * 180.0 / M_PI;
+        turn_hold_duration = std::clamp((angle_deg / 15.0), 1.0, 6.0);
         in_turn = true;
         last_turn_time = now;
-        RCLCPP_WARN(this->get_logger(), "Turning detected, lowering speed (effective_angle=%.2f deg)", effective_angle * 180.0 / M_PI);
+        RCLCPP_WARN(this->get_logger(), "Turning detected, lowering speed (effective_angle=%.2f deg)", angle_deg);
     } else if (in_turn && (now - last_turn_time).seconds() < turn_hold_duration) {
         double time_left = turn_hold_duration - (now - last_turn_time).seconds();
         RCLCPP_INFO(this->get_logger(), "Time until full speed: %.2f s", time_left);
