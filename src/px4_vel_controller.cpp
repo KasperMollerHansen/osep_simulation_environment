@@ -346,7 +346,7 @@ Eigen::Vector3d PX4VelController::calculate_safe_velocity(
     double& effective_angle)
 {
     // Use target_idx_ for both path following and turn anticipation
-    const int lookahead_points = 6 * inspection_speed_ / interpolation_distance_;
+    const int lookahead_points = 3 * inspection_speed_ / interpolation_distance_;
 
     // Calculate effective angle using the turn_detection helper
     effective_angle = turn_detection(path, target_idx_, current_tf_pos, lookahead_points);
