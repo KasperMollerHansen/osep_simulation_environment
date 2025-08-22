@@ -40,6 +40,7 @@ private:
     rclcpp::Time last_path_time_;
     Eigen::Vector3d last_valid_tf_pos_;
     double last_valid_tf_yaw_;
+    double sharp_turn_thresh_;
 
     // Callbacks
     void path_callback(const nav_msgs::msg::Path::SharedPtr msg);

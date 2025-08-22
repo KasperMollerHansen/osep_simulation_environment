@@ -21,6 +21,7 @@ PX4VelController::PX4VelController()
     this->declare_parameter<double>("inspection_speed", 1.0);
     this->declare_parameter<double>("max_yaw_to_velocity_angle_deg", 120.0);
     this->declare_parameter<int>("frequency", 1000);
+    this->declare_parameter<double>("sharp_turn_thresh_deg", 30.0);
 
     std::string path_topic = this->get_parameter("path_topic").as_string();
     std::string vel_cmd_topic = this->get_parameter("osep_vel_cmd").as_string();
@@ -31,6 +32,8 @@ PX4VelController::PX4VelController()
     max_yaw_to_velocity_angle_ = max_yaw_to_velocity_angle_deg * M_PI / 180.0;
     int frequency = this->get_parameter("frequency").as_int();
     int ms_per_cycle = 1000 / frequency;
+    double sharp_turn_thresh_deg = this->get_parameter("sharp_turn_thresh_deg").as_double();
+    sharp_turn_thresh_ = sharp_turn_thresh_deg * M_PI / 180.0;
 
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -93,7 +96,7 @@ size_t PX4VelController::find_target_idx(const nav_msgs::msg::Path::SharedPtr &p
     for (; i < path->poses.size(); ++i) {
         const auto &pose = path->poses[i];
         Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
-        if ((pos - current_pos).norm() > interpolation_distance_) {
+        if ((pos - current_pos).norm() > interpolation_distance_/2) {
             break;
         }
     }
@@ -152,33 +155,43 @@ size_t PX4VelController::find_furthest_collinear_idx(const nav_msgs::msg::Path::
 
 double PX4VelController::compute_adaptive_speed(double distance, double effective_angle)
 {
-    static const double turn_hold_duration = 3.0 * inspection_speed_ * interpolation_distance_; // 12 seconds for 2 m/s and 2 m
+    static double turn_hold_duration = 0.0;
     static bool in_turn = false;
     static rclcpp::Time last_turn_time;
 
     double slope = 0.15;
-    double sharp_turn_thresh = M_PI / 6.0; // 30 degrees
+    double sharp_turn_thresh = sharp_turn_thresh_;
 
     double adaptive_speed = 0.0;
     rclcpp::Time now = this->now();
 
     // Hysteresis: stay in "turn" for a while after angle drops
     if (effective_angle >= sharp_turn_thresh) {
+        double angle_deg = effective_angle * 180.0 / M_PI;
+        turn_hold_duration = std::clamp((angle_deg / 15.0), 1.0, 6.0);
         in_turn = true;
         last_turn_time = now;
+        RCLCPP_WARN(this->get_logger(), "Turning detected, lowering speed (effective_angle=%.2f deg)", angle_deg);
     } else if (in_turn && (now - last_turn_time).seconds() < turn_hold_duration) {
-        // Stay in turn for hold duration
-        // in_turn remains true
+        double time_left = turn_hold_duration - (now - last_turn_time).seconds();
+        RCLCPP_INFO(this->get_logger(), "Time until full speed: %.2f s", time_left);
     } else {
         in_turn = false;
     }
 
     if (distance > 1e-6) {
         adaptive_speed = slope * distance;
-        adaptive_speed = std::min(max_speed_, adaptive_speed);
         if (!in_turn) {
+            adaptive_speed = std::min(max_speed_, adaptive_speed);
             adaptive_speed = std::max(inspection_speed_, adaptive_speed);
         }
+        else {
+            adaptive_speed = 2 * adaptive_speed;
+            adaptive_speed = std::min(max_speed_, adaptive_speed);
+        }
+    }
+    else {
+        adaptive_speed = 0.0;
     }
     // RCLCPP_INFO(this->get_logger(), "Adaptive speed: %f", adaptive_speed);
     return adaptive_speed;
