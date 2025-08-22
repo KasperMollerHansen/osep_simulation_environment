@@ -181,12 +181,17 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
 
     if (distance > 1e-6) {
         adaptive_speed = slope * distance;
-        adaptive_speed = std::min(max_speed_, adaptive_speed);
         if (!in_turn) {
+            adaptive_speed = std::min(max_speed_, adaptive_speed);
             adaptive_speed = std::max(inspection_speed_, adaptive_speed);
         }
         else {
+            adaptive_speed = 2 * adaptive_speed;
+            adaptive_speed = std::min(max_speed_, adaptive_speed);
         }
+    }
+    else {
+        adaptive_speed = 0.0;
     }
     // RCLCPP_INFO(this->get_logger(), "Adaptive speed: %f", adaptive_speed);
     return adaptive_speed;
@@ -346,7 +351,7 @@ Eigen::Vector3d PX4VelController::calculate_safe_velocity(
     double& effective_angle)
 {
     // Use target_idx_ for both path following and turn anticipation
-    const int lookahead_points = 3 * inspection_speed_ / interpolation_distance_;
+    const int lookahead_points = 6 * inspection_speed_ / interpolation_distance_;
 
     // Calculate effective angle using the turn_detection helper
     effective_angle = turn_detection(path, target_idx_, current_tf_pos, lookahead_points);
