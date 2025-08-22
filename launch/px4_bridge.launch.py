@@ -31,7 +31,8 @@ def generate_launch_description():
                 'max_speed': 15.0,
                 'inspection_speed': 2.0,
                 'max_yaw_to_velocity_angle_deg': 120.0,
-                'frequency': 50
+                'frequency': 50,
+                'sharp_turn_thresh_deg': 30.0,
             }]
         )
     ])
