@@ -174,7 +174,7 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
         RCLCPP_WARN(this->get_logger(), "Turning detected, lowering speed (effective_angle=%.2f deg)", angle_deg);
     } else if (in_turn && (now - last_turn_time).seconds() < turn_hold_duration) {
         double time_left = turn_hold_duration - (now - last_turn_time).seconds();
-        RCLCPP_INFO(this->get_logger(), "Time until full speed: %.2f s", time_left);
+        // RCLCPP_INFO(this->get_logger(), "Time until full speed: %.2f s", time_left);
     } else {
         in_turn = false;
     }
