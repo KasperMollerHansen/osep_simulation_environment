@@ -96,7 +96,7 @@ size_t PX4VelController::find_target_idx(const nav_msgs::msg::Path::SharedPtr &p
     for (; i < path->poses.size(); ++i) {
         const auto &pose = path->poses[i];
         Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
-        if ((pos - current_pos).norm() > interpolation_distance_/2) {
+        if ((pos - current_pos).norm() > interpolation_distance_ * 3 / 4) {
             break;
         }
     }
