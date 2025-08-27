@@ -194,7 +194,7 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
         adaptive_speed = 0.0;
     }
     // RCLCPP_INFO(this->get_logger(), "Adaptive speed: %f", adaptive_speed);
-    RCLCPP_INFO(this->get_logger(), "Effective angle: %f", effective_angle * 180.0 / M_PI);
+    // RCLCPP_INFO(this->get_logger(), "Effective angle: %f", effective_angle * 180.0 / M_PI);
     return adaptive_speed;
 }
 
