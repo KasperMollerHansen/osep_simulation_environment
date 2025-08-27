@@ -168,7 +168,7 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
     // Hysteresis: stay in "turn" for a while after angle drops
     if (effective_angle >= sharp_turn_thresh) {
         double angle_deg = effective_angle * 180.0 / M_PI;
-        turn_hold_duration = std::clamp((angle_deg / 15.0), 1.0, 6.0);
+        turn_hold_duration = std::clamp(std::pow(angle_deg / 30.0, 2), 1.0, 9.0);
         in_turn = true;
         last_turn_time = now;
         // RCLCPP_INFO(this->get_logger(), "Turning detected, lowering speed (effective_angle=%.2f deg)", angle_deg);
