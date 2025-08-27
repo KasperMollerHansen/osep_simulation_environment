@@ -96,7 +96,7 @@ size_t PX4VelController::find_target_idx(const nav_msgs::msg::Path::SharedPtr &p
     for (; i < path->poses.size(); ++i) {
         const auto &pose = path->poses[i];
         Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
-        if ((pos - current_pos).norm() > interpolation_distance_/2) {
+        if ((pos - current_pos).norm() > interpolation_distance_ * 3 / 4) {
             break;
         }
     }
@@ -168,7 +168,7 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
     // Hysteresis: stay in "turn" for a while after angle drops
     if (effective_angle >= sharp_turn_thresh) {
         double angle_deg = effective_angle * 180.0 / M_PI;
-        turn_hold_duration = std::clamp((angle_deg / 15.0), 1.0, 6.0);
+        turn_hold_duration = std::clamp(std::pow(angle_deg / 30.0, 2), 1.0, 9.0);
         in_turn = true;
         last_turn_time = now;
         // RCLCPP_INFO(this->get_logger(), "Turning detected, lowering speed (effective_angle=%.2f deg)", angle_deg);
@@ -194,6 +194,7 @@ double PX4VelController::compute_adaptive_speed(double distance, double effectiv
         adaptive_speed = 0.0;
     }
     // RCLCPP_INFO(this->get_logger(), "Adaptive speed: %f", adaptive_speed);
+    // RCLCPP_INFO(this->get_logger(), "Effective angle: %f", effective_angle * 180.0 / M_PI);
     return adaptive_speed;
 }
 
