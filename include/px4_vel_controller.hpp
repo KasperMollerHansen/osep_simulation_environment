@@ -32,6 +32,7 @@ private:
     double max_speed_;
     double inspection_speed_;
     double interpolation_distance_;
+    double clearing_distance_;
     double max_yaw_to_velocity_angle_;
     size_t target_idx_;
     nav_msgs::msg::Path::SharedPtr latest_path_;

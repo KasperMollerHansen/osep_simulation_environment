@@ -17,6 +17,7 @@ PX4VelController::PX4VelController()
     this->declare_parameter<std::string>("path_topic", "/planner/path");
     this->declare_parameter<std::string>("osep_vel_cmd", "/osep/vel_cmd");
     this->declare_parameter<double>("interpolation_distance", 2.0);
+    this->declare_parameter<double>("clearing_distance", 1.0);
     this->declare_parameter<double>("max_speed", 15.0);
     this->declare_parameter<double>("inspection_speed", 1.0);
     this->declare_parameter<double>("max_yaw_to_velocity_angle_deg", 120.0);
@@ -26,6 +27,7 @@ PX4VelController::PX4VelController()
     std::string path_topic = this->get_parameter("path_topic").as_string();
     std::string vel_cmd_topic = this->get_parameter("osep_vel_cmd").as_string();
     interpolation_distance_ = this->get_parameter("interpolation_distance").as_double();
+    clearing_distance_ = this->get_parameter("clearing_distance").as_double();
     max_speed_ = this->get_parameter("max_speed").as_double();
     inspection_speed_ = this->get_parameter("inspection_speed").as_double();
     double max_yaw_to_velocity_angle_deg = this->get_parameter("max_yaw_to_velocity_angle_deg").as_double();
@@ -96,7 +98,7 @@ size_t PX4VelController::find_target_idx(const nav_msgs::msg::Path::SharedPtr &p
     for (; i < path->poses.size(); ++i) {
         const auto &pose = path->poses[i];
         Eigen::Vector3d pos(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
-        if ((pos - current_pos).norm() > interpolation_distance_ * 3 / 4) {
+        if ((pos - current_pos).norm() > clearing_distance_) {
             break;
         }
     }
