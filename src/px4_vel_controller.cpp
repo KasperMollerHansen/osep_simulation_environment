@@ -23,6 +23,8 @@ PX4VelController::PX4VelController()
     this->declare_parameter<double>("max_yaw_to_velocity_angle_deg", 120.0);
     this->declare_parameter<int>("frequency", 1000);
     this->declare_parameter<double>("sharp_turn_thresh_deg", 30.0);
+    this->declare_parameter<double>("max_yaw_speed", 0.30);
+    this->declare_parameter<double>("max_yaw_acc", 10.0);
 
     std::string path_topic = this->get_parameter("path_topic").as_string();
     std::string vel_cmd_topic = this->get_parameter("osep_vel_cmd").as_string();
@@ -36,6 +38,8 @@ PX4VelController::PX4VelController()
     int ms_per_cycle = 1000 / frequency;
     double sharp_turn_thresh_deg = this->get_parameter("sharp_turn_thresh_deg").as_double();
     sharp_turn_thresh_ = sharp_turn_thresh_deg * M_PI / 180.0;
+    max_yawspeed_ = this->get_parameter("max_yaw_speed").as_double();
+    max_yaw_acc_ = this->get_parameter("max_yaw_acc").as_double();
 
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -249,8 +253,8 @@ double PX4VelController::clamp_angle(double angle)
 
 double PX4VelController::compute_yawspeed(double target_yaw, double current_yaw, double dt)
 {
-    double max_yawspeed = 0.10;
-    double max_yaw_acc = 10.0;
+    double max_yawspeed = max_yawspeed_;
+    double max_yaw_acc = max_yaw_acc_;
 
     static double last_yawspeed = 0.0;
     double yaw_error = std::atan2(std::sin(target_yaw - current_yaw), std::cos(target_yaw - current_yaw));

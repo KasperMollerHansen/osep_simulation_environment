@@ -42,6 +42,8 @@ private:
     Eigen::Vector3d last_valid_tf_pos_;
     double last_valid_tf_yaw_;
     double sharp_turn_thresh_;
+    double max_yawspeed_;
+    double max_yaw_acc_;
 
     // Callbacks
     void path_callback(const nav_msgs::msg::Path::SharedPtr msg);
